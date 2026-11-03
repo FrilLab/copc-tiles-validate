@@ -31,3 +31,17 @@ jobs:
           consumer=$(mktemp -d)
           npm install --prefix "$consumer" --no-audit --no-fund "$package_file"
           "$consumer/node_modules/.bin/copc-tiles-validate" --help
+
+  producer-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+      - name: Install pinned producer fixtures dependencies
+        working-directory: integration/producer-fixtures
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate and validate producer fixtures
+        working-directory: integration/producer-fixtures
+        run: npm test

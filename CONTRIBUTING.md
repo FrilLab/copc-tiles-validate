@@ -67,7 +67,7 @@ These shell examples use POSIX utilities and work in macOS and Linux shells. The
 ## Validation changes and tests
 
 - Add automated positive and negative regression cases for every new validation rule. Positive cases should cover valid 3D Tiles 1.0 and 1.1 inputs where the rule applies; negative cases should exercise malformed and unsafe inputs.
-- Keep fixtures small and local. Do not make tests fetch remote URIs or require COPC Adapter, Cesium, native modules, or external validator packages.
+- Keep validator unit fixtures small and local. The default test suite must not fetch remote URIs or require COPC Adapter, Cesium, native modules, or external validator packages. The scoped issue #24 integration in `integration/producer-fixtures` is the exception: its separate locked package and CI job use pinned public producer artifacts to generate and validate synthetic fixtures. Do not add those packages to the root package or make the default test suite depend on them.
 - Make each error explain the input problem and expected structure in its diagnostic message. Tests should assert the relevant issue code and the behavior that identifies the failure.
 - Bound reads, parsing, and traversal. Treat URIs, binary lengths, tree depth, and filesystem links as untrusted input.
 - Keep structural checks distinct from semantic validation and official conformance. Update the README's implemented checks and limitations when coverage changes.

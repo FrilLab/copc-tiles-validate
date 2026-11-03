@@ -76,3 +76,11 @@ This package performs partial structural checks:
 - Structural checks do not replace the official CesiumGS or Khronos validators.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, verification, and review expectations. See [NOTICE.md](NOTICE.md) for attribution and provenance.
+
+## Producer-generated fixture gate
+
+The separate [`integration/producer-fixtures`](integration/producer-fixtures/README.md) job generates explicit and implicit 3D Tiles outputs through the pinned `@frillab/copc-tiles` producer APIs and Adapter Core's public point-preparation APIs. It checks byte hashes, validates every case through both the public API and CLI, and mutates generated assets for negative coverage. Its producer packages are test-only; the validator package and Node 22/24/26 CI matrix remain independent of them.
+
+The fixture source is synthetic and implements Adapter Core's public source contract. It exercises the real Core coordinate preparation and Tiles generators without opening a COPC file, so it does not establish real-source CRS or content interoperability.
+
+To run the integration fixture job locally, use `npm ci` and `npm test` from `integration/producer-fixtures`.
