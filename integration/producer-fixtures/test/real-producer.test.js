@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -321,10 +321,14 @@ async function makeCases(root, generated) {
   const cases = [
     {
       name: "explicit valid output", source: generated.explicitDirectory, expectedValid: true,
+      category: "valid-supported-assets",
+      compareGlbSemantics: true,
       expectedCode: null, expectedWarnings: ["GLTF_SEMANTICS_UNVERIFIED"], expectedStats: { glbs: 2, tiles: 3 },
     },
     {
       name: "implicit valid output", source: generated.implicitDirectory, expectedValid: true,
+      category: "ambiguous-semantics",
+      compareGlbSemantics: true,
       expectedCode: null, expectedWarnings: ["SUBTREE_SEMANTICS_UNVERIFIED", "IMPLICIT_PARTIAL", "IMPLICIT_CONTENT_UNVERIFIED"],
       expectedStats: { subtrees: 1, tiles: 1 },
     },
@@ -415,8 +419,30 @@ async function makeCases(root, generated) {
     const destination = join(root, `negative-${index}`);
     await copyDirectory(item.source, destination);
     await item.mutate(destination);
-    cases.push({ name: item.name, source: destination, expectedValid: false, expectedCode: item.expectedCode });
+    cases.push({
+      name: item.name,
+      source: destination,
+      expectedValid: false,
+      expectedCode: item.expectedCode,
+      category: "malformed-supported-structure",
+      compareGlbSemantics: ["GLB_MAGIC", "GLB_LENGTH", "GLB_CHUNK_LENGTH"].includes(item.expectedCode),
+    });
   }
+
+  const extensionDirectory = join(root, "unsupported-extension");
+  await copyDirectory(generated.explicitDirectory, extensionDirectory);
+  const extensionTilesetPath = join(extensionDirectory, "tileset.json");
+  const extensionTileset = JSON.parse(await readFile(extensionTilesetPath, "utf8"));
+  extensionTileset.extensionsUsed = [...(extensionTileset.extensionsUsed ?? []), "VENDOR_example_unverified"];
+  await writeJson(extensionTilesetPath, extensionTileset);
+  cases.push({
+    name: "producer output declares an unsupported extension",
+    source: extensionDirectory,
+    expectedValid: true,
+    category: "unsupported-extension-or-format",
+    expectedWarnings: ["EXTENSION_UNVERIFIED"],
+    compareGlbSemantics: true,
+  });
   return cases;
 }
 
@@ -425,8 +451,174 @@ function reportSummary(report) {
     valid: report.valid,
     conformance: report.conformance,
     issues: report.issues.map(({ code, severity }) => ({ code, severity })),
+    coverage: {
+      status: report.coverage.status,
+      checked: report.coverage.checked.map(({ kind }) => kind).sort(),
+      partial: report.coverage.partial.map(({ kind }) => kind).sort(),
+      skipped: report.coverage.skipped.map(({ kind, reason }) => ({ kind, reason })).sort((a, b) => a.kind.localeCompare(b.kind)),
+    },
     stats: report.stats,
   };
+}
+
+async function listGlbFiles(directory, base = directory) {
+  const result = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) result.push(...await listGlbFiles(path, base));
+    else if (entry.isFile() && entry.name.toLowerCase().endsWith(".glb")) {
+      result.push({ path, relativePath: relative(base, path).split("\\").join("/") });
+    }
+  }
+  return result.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
+function summarizeCesium(result, expectedGlbPaths) {
+  const issues = result.issues.map((issue) => ({
+    type: issue.type,
+    severity: issue.severity,
+    path: issue.path,
+    message: issue.message,
+  }));
+  const hasErrors = issues.some((issue) => issue.severity === "ERROR");
+  const inspectedGlbs = new Set(issues
+    .filter((issue) => issue.type.startsWith("CONTENT_VALIDATION_") && issue.path.toLowerCase().endsWith(".glb"))
+    .map((issue) => issue.path.replaceAll("\\", "/")));
+  const uninspectedGlbs = expectedGlbPaths.filter((path) => !inspectedGlbs.has(path));
+  return {
+    outcome: hasErrors ? "reject" : uninspectedGlbs.length > 0 ? "unverified" : "accept",
+    errorCount: issues.filter((issue) => issue.severity === "ERROR").length,
+    warningCount: issues.filter((issue) => issue.severity === "WARNING").length,
+    uninspectedGlbs,
+    issues,
+  };
+}
+
+function summarizeKhronos(report) {
+  const messages = report.issues.messages.map(({ code, severity }) => ({ code, severity }));
+  return {
+    outcome: report.issues.numErrors > 0 ? "reject" : "accept",
+    errorCount: report.issues.numErrors,
+    warningCount: report.issues.numWarnings,
+    messages,
+  };
+}
+
+function classifyComparison(localOutcome, officialOutcome, category, applicable) {
+  if (!applicable) return "not-applicable";
+  if (officialOutcome === "unverified") return "official-tool-version-limitation";
+  if (localOutcome === "unverified") return "unsupported-standard-rule";
+  if (localOutcome === officialOutcome) return "agreement";
+  if (category === "unsupported-extension-or-format" || category === "ambiguous-semantics") {
+    return "unsupported-standard-rule";
+  }
+  return localOutcome === "reject" ? "validator-false-positive" : "validator-false-negative";
+}
+
+async function runDifferentialValidation(cases, records) {
+  const { createRequire } = await import("node:module");
+  const require = createRequire(import.meta.url);
+  const cesiumPackage = require("3d-tiles-validator/package.json");
+  const gltfPackage = require("gltf-validator/package.json");
+  const cesiumValidator = require("3d-tiles-validator").Validators;
+  const gltfValidator = require("gltf-validator");
+  const baseline = JSON.parse(await readFile(join(testDirectory, "../conformance-baseline.json"), "utf8"));
+  assert.equal(cesiumPackage.version, baseline.tools.cesium, "CesiumGS validator version must match the baseline");
+  assert.equal(gltfPackage.version, baseline.tools.khronos, "Khronos validator version must match the baseline");
+  assert.equal(gltfValidator.version(), baseline.tools.khronos, "Khronos runtime version must match the baseline");
+
+  const apiByName = new Map(records.map((record) => [record.name, record.api]));
+  const comparisons = [];
+  for (const fixtureCase of cases) {
+    const local = apiByName.get(fixtureCase.name);
+    const localOutcome = local.valid ? "accept" : "reject";
+    const glbError = local.issues.some((issue) => issue.severity === "ERROR" &&
+      (issue.code.startsWith("GLB_") || issue.code.startsWith("GLTF_")));
+    const localGlbOutcome = glbError ? "reject" :
+      local.coverage.checked.includes("glb-container") ? "accept" : "unverified";
+    const files = await listGlbFiles(fixtureCase.source);
+    const cesium = summarizeCesium(
+      await cesiumValidator.validateTilesetFile(join(fixtureCase.source, "tileset.json")),
+      files.map((file) => file.relativePath),
+    );
+    const glbs = [];
+    for (const file of files) {
+      const bytes = await readFile(file.path);
+      const gltfReport = await gltfValidator.validateBytes(new Uint8Array(bytes), {
+        uri: file.relativePath,
+        format: "glb",
+        writeTimestamp: false,
+      });
+      glbs.push({ path: file.relativePath, ...summarizeKhronos(gltfReport) });
+    }
+    const khronosOutcome = glbs.every((glb) => glb.outcome === "accept") ? "accept" : "reject";
+    const cesiumComparison = classifyComparison(localOutcome, cesium.outcome, fixtureCase.category, true);
+    const gltfComparison = classifyComparison(
+      localGlbOutcome,
+      khronosOutcome,
+      fixtureCase.category,
+      fixtureCase.compareGlbSemantics === true,
+    );
+    comparisons.push({
+      name: fixtureCase.name,
+      category: fixtureCase.category,
+      local: { outcome: localOutcome, glbContainerOutcome: localGlbOutcome, coverage: local.coverage },
+      cesium,
+      khronos: { outcome: khronosOutcome, content: glbs },
+      comparison: { localVsCesium: cesiumComparison, localVsKhronos: gltfComparison },
+    });
+  }
+
+  const summary = {
+    schemaVersion: 1,
+    tools: { cesium: cesiumPackage.version, khronos: gltfPackage.version },
+    producers: expectedHashes.producer,
+    fixtureArtifactHashes: expectedHashes.artifacts,
+    ruleMapping: "CONFORMANCE.md",
+    cases: comparisons,
+  };
+  const reportPath = process.env.CONFORMANCE_REPORT_PATH ?? join(process.cwd(), "conformance-summary.json");
+  await writeFile(reportPath, JSON.stringify(summary, null, 2) + "\n");
+  console.log(`DIFFERENTIAL_CONFORMANCE_SUMMARY ${JSON.stringify(summary)}`);
+
+  const expectedNames = new Set(baseline.cases.map((entry) => entry.name));
+  assert.deepEqual(comparisons.map((entry) => entry.name).sort(), [...expectedNames].sort(),
+    "fixture cases must match the reviewed conformance baseline");
+  for (const entry of comparisons) {
+    const expected = baseline.cases.find((item) => item.name === entry.name);
+    assert.equal(entry.category, expected.category, `${entry.name}: fixture classification`);
+    assert.equal(entry.local.outcome, expected.local, `${entry.name}: local validator outcome`);
+    assert.equal(entry.local.glbContainerOutcome, expected.localGlbContainer,
+      `${entry.name}: local GLB container coverage outcome`);
+    assert.equal(entry.cesium.outcome, expected.cesium, `${entry.name}: CesiumGS validator outcome`);
+    assert.equal(entry.khronos.outcome, expected.khronos, `${entry.name}: Khronos validator outcome`);
+    assert.equal(entry.comparison.localVsCesium, expected.localVsCesium,
+      `${entry.name}: documented local/Cesium comparison`);
+    assert.equal(entry.comparison.localVsKhronos, expected.localVsKhronos,
+      `${entry.name}: documented local/Khronos comparison`);
+  }
+
+  for (const entry of comparisons.filter((item) => item.category === "valid-supported-assets" ||
+      item.name === "implicit valid output")) {
+    assert.equal(entry.local.outcome, "accept", `${entry.name}: local validator must accept producer output`);
+    assert.equal(entry.cesium.outcome, "accept", `${entry.name}: CesiumGS must accept producer output`);
+    assert.equal(entry.khronos.outcome, "accept", `${entry.name}: Khronos must accept producer GLBs`);
+  }
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const lines = [
+      "## Differential validation against official validators",
+      "",
+      `CesiumGS 3D Tiles Validator ${cesiumPackage.version}; Khronos glTF Validator ${gltfPackage.version}.`,
+      `Machine-readable report: conformance-summary.json (${comparisons.length} cases). Unverified means no coverage record exists for a generated GLB.`,
+      "",
+      "| Fixture | Category | Local tileset | Local GLB | CesiumGS | Khronos GLB | Local / CesiumGS | GLB / Khronos |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      ...comparisons.map((entry) => `| ${entry.name} | ${entry.category} | ${entry.local.outcome} | ${entry.local.glbContainerOutcome} | ${entry.cesium.outcome} | ${entry.khronos.outcome} | ${entry.comparison.localVsCesium} | ${entry.comparison.localVsKhronos} |`),
+      "",
+    ];
+    await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));
+  }
 }
 
 test("published producer outputs validate through the public API and CLI", async (t) => {
@@ -507,6 +699,9 @@ test("published producer outputs validate through the public API and CLI", async
         "",
       ];
       await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));
+    }
+    if (process.env.RUN_OFFICIAL_CONFORMANCE === "1") {
+      await runDifferentialValidation(cases, records);
     }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });

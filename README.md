@@ -80,8 +80,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, verification, and review expec
 
 ## Producer-generated fixture gate
 
-The separate [`integration/producer-fixtures`](integration/producer-fixtures/README.md) job generates explicit and implicit 3D Tiles outputs through the pinned `@frillab/copc-tiles` producer APIs and Adapter Core's public point-preparation APIs. It checks byte hashes, validates every case through both the public API and CLI, and mutates generated assets for negative coverage. Its producer packages are test-only; the validator package and Node 22/24/26 CI matrix remain independent of them.
+The separate [`integration/producer-fixtures`](integration/producer-fixtures/README.md) job generates explicit and implicit 3D Tiles outputs through the pinned `@frillab/copc-tiles` producer APIs and Adapter Core's public point-preparation APIs. It checks byte hashes, validates every case through both the public API and CLI, and compares the same outputs with pinned CesiumGS and Khronos validators. The producer and official validator packages are test-only; they stay out of the published dependency graph and Node 22/24/26 validator matrix.
 
 The fixture source is synthetic and implements Adapter Core's public source contract. It exercises the real Core coordinate preparation and Tiles generators without opening a COPC file, so it does not establish real-source CRS or content interoperability.
 
-To run the integration fixture job locally, use `npm ci` and `npm test` from `integration/producer-fixtures`.
+To run the integration fixture and differential checks locally, use `npm ci` and `npm run test:conformance` from `integration/producer-fixtures`. The separate conformance job uses Node 22.17.0 because the official validator dependency graph has native and Node-version constraints. Use the generated report as evidence for a narrow conformance statement; this job does not establish full 3D Tiles or glTF conformance.

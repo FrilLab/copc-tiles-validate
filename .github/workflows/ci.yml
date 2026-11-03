@@ -32,16 +32,25 @@ jobs:
           npm install --prefix "$consumer" --no-audit --no-fund "$package_file"
           "$consumer/node_modules/.bin/copc-tiles-validate" --help
 
-  producer-fixtures:
+  differential-conformance:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.12.0"
-      - name: Install pinned producer fixtures dependencies
+          node-version: "22.17.0"
+      - name: Install pinned producer and official validator tools
         working-directory: integration/producer-fixtures
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Generate and validate producer fixtures
+        run: npm ci --no-audit --no-fund
+      - name: Generate fixtures and compare validator outcomes
         working-directory: integration/producer-fixtures
-        run: npm test
+        env:
+          CONFORMANCE_REPORT_PATH: ${{ runner.temp }}/conformance-summary.json
+        run: npm run test:conformance
+      - name: Upload differential conformance summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-conformance-summary
+          path: ${{ runner.temp }}/conformance-summary.json
+          if-no-files-found: warn
