@@ -1,7 +1,7 @@
 {
   "name": "@frillab/copc-tiles-validate",
   "version": "0.1.0",
-  "description": "Dependency-free structural validation for general 3D Tiles assets",
+  "description": "Dependency-free structural validation for local 3D Tiles 1.0 and 1.1 assets",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -18,9 +18,11 @@
   },
   "files": [
     "src/",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "LICENSE",
-    "NOTICE.md",
-    "README.md"
+    "NOTICE.md"
   ],
   "scripts": {
     "test": "node --test",
@@ -30,6 +32,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/FrilLab/copc-tiles-validate.git"
+  },
+  "homepage": "https://github.com/FrilLab/copc-tiles-validate#readme",
+  "bugs": {
+    "url": "https://github.com/FrilLab/copc-tiles-validate/issues"
   },
   "types": "./src/index.d.ts"
 }
