@@ -374,7 +374,11 @@ test("validates schema and group structure and keeps schemaUri within the root",
 test("validates root implicit subtree, reports limited coverage", async () => {
   await temporary(async (dir) => {
     await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
-    await writeFile(join(dir, "subtrees", "0", "0", "0.subtree"), subtree());
+    await writeFile(join(dir, "subtrees", "0", "0", "0.subtree"), subtree({
+      tileAvailability: { constant: 1 },
+      contentAvailability: [{ constant: 0 }],
+      childSubtreeAvailability: { constant: 0 },
+    }));
     await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
       implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
         availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.subtree" } },
@@ -383,7 +387,299 @@ test("validates root implicit subtree, reports limited coverage", async () => {
     const report = await validateTileset(dir);
     assert.equal(report.valid, true);
     assert.equal(report.stats.subtrees, 1);
-    assert.ok(codes(report).includes("IMPLICIT_PARTIAL"));
+    assert.ok(report.coverage.checked.some((entry) => entry.kind === "subtree-availability"));
+    assert.ok(!codes(report).includes("IMPLICIT_PARTIAL"));
+  });
+});
+
+test("traverses reachable child subtrees and follows only available references", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await mkdir(join(dir, "subtrees", "1", "1"), { recursive: true });
+    const rootDocument = {
+      buffers: [{ byteLength: 16 }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 1 },
+        { buffer: 0, byteOffset: 8, byteLength: 1 },
+      ],
+      tileAvailability: { constant: 1 },
+      childSubtreeAvailability: { bitstream: 1, availableCount: 1 },
+    };
+    const rootBinary = Buffer.alloc(16);
+    rootBinary[8] = 8;
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), subtree(rootDocument, rootBinary));
+    await writeFile(join(dir, "subtrees", "1", "1", "1.json"), JSON.stringify({
+      tileAvailability: { constant: 1 },
+      childSubtreeAvailability: { constant: 0 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 1,
+        availableLevels: 3, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    const report = await validateTileset(dir);
+    assert.equal(report.valid, true, JSON.stringify(report.issues));
+    assert.equal(report.stats.subtrees, 2);
+    assert.ok(!codes(report).includes("RESOURCE_MISSING"));
+  });
+});
+
+test("applies maxDepth before requesting a child subtree", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    const document = {
+      buffers: [{ byteLength: 8 }],
+      bufferViews: [{ buffer: 0, byteLength: 2 }],
+      tileAvailability: { constant: 1 },
+      childSubtreeAvailability: { bitstream: 0 },
+    };
+    const binary = Buffer.alloc(8);
+    binary[0] = 1;
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), subtree(document, binary));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+        availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    const report = await validateTileset(dir, { maxDepth: 1 });
+    assert.ok(codes(report).includes("TILE_LIMIT"));
+    assert.ok(!codes(report).includes("RESOURCE_MISSING"));
+    assert.equal(report.stats.subtrees, 1);
+  });
+});
+
+test("bounds dense child subtree availability traversal with maxTiles", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      tileAvailability: { constant: 1 }, childSubtreeAvailability: { constant: 1 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 3,
+        availableLevels: 8, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    const report = await validateTileset(dir, { maxTiles: 2, maxResources: 10 });
+    assert.ok(codes(report).includes("TILE_LIMIT"));
+    assert.equal(report.stats.subtrees, 1);
+    assert.ok(report.stats.resources <= 1);
+  });
+});
+
+test("applies maxResources to reachable subtree traversal", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      tileAvailability: { constant: 1 }, childSubtreeAvailability: { constant: 1 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 1,
+        availableLevels: 3, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    const report = await validateTileset(dir, { maxResources: 1 });
+    assert.ok(codes(report).includes("RESOURCE_LIMIT"));
+    assert.equal(report.stats.subtrees, 1);
+    assert.ok(!codes(report).includes("RESOURCE_MISSING"));
+  });
+});
+
+test("checks content URIs only for available content bits", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await mkdir(join(dir, "content", "0", "0"), { recursive: true });
+    await writeFile(join(dir, "content", "0", "0", "0.glb"), glb());
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      tileAvailability: { constant: 1 },
+      contentAvailability: [{ constant: 1 }],
+      childSubtreeAvailability: { constant: 0 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 1,
+        availableLevels: 2, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+      content: { uri: "content/{level}/{x}/{y}.glb" },
+    })));
+    const report = await validateTileset(dir);
+    assert.equal(report.valid, true, JSON.stringify(report.issues));
+    assert.equal(report.stats.glbs, 1);
+  });
+});
+
+test("reports missing reachable child subtrees and available content resources", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    const rootDocument = {
+      buffers: [{ byteLength: 16 }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 1 },
+        { buffer: 0, byteOffset: 8, byteLength: 1 },
+      ],
+      tileAvailability: { constant: 1 },
+      contentAvailability: [{ constant: 1 }],
+      childSubtreeAvailability: { bitstream: 1 },
+    };
+    const binary = Buffer.alloc(16);
+    binary[8] = 1;
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), subtree(rootDocument, binary));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 1,
+        availableLevels: 3, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+      content: { uri: "content/{level}/{x}/{y}.glb" },
+    })));
+    const report = await validateTileset(dir);
+    assert.ok(codes(report).includes("RESOURCE_MISSING"));
+    assert.ok(report.issues.some((issue) => issue.path.includes("contentAvailability")));
+  });
+});
+
+test("rejects child subtree symlinks that escape the input root", async () => {
+  await temporary(async (dir) => {
+    const root = join(dir, "tiles");
+    const childPath = join(root, "subtrees", "1", "0", "0.json");
+    await mkdir(join(root, "subtrees", "0", "0"), { recursive: true });
+    await mkdir(join(root, "subtrees", "1", "0"), { recursive: true });
+    await writeFile(join(dir, "outside.json"), JSON.stringify({
+      tileAvailability: { constant: 1 }, childSubtreeAvailability: { constant: 0 },
+    }));
+    const document = {
+      buffers: [{ byteLength: 16 }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 1 },
+        { buffer: 0, byteOffset: 8, byteLength: 1 },
+      ],
+      tileAvailability: { constant: 1 },
+      childSubtreeAvailability: { bitstream: 1 },
+    };
+    const binary = Buffer.alloc(16);
+    binary[8] = 1;
+    await writeFile(join(root, "subtrees", "0", "0", "0.json"), subtree(document, binary));
+    await symlink(join(dir, "outside.json"), childPath);
+    await writeFile(join(root, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 1,
+        availableLevels: 3, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    assert.ok(codes(await validateTileset(join(root, "tileset.json")))
+      .includes("URI_SYMLINK_ESCAPE"));
+  });
+});
+
+test("does not request content or child subtrees beneath unavailable tiles", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    const document = {
+      buffers: [{ byteLength: 16 }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 1 },
+        { buffer: 0, byteOffset: 8, byteLength: 1 },
+      ],
+      tileAvailability: { bitstream: 0 },
+      contentAvailability: [{ bitstream: 1 }],
+      childSubtreeAvailability: { constant: 0 },
+    };
+    const binary = Buffer.alloc(16);
+    binary[0] = 1;
+    binary[8] = 2;
+    await writeFile(join(dir, "subtrees", "0", "0", "0.subtree"), subtree(document, binary));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+        availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.subtree" } },
+      content: { uri: "missing-content/{level}/{x}/{y}.glb" },
+    })));
+    const report = await validateTileset(dir);
+    assert.ok(codes(report).includes("SUBTREE_CONTENT_TILE_UNAVAILABLE"));
+    assert.ok(!codes(report).includes("RESOURCE_MISSING"));
+  });
+});
+
+test("rejects available tiles and child subtrees with unavailable parents", async () => {
+  for (const [subtreeLevels, document, binary, expectedCode] of [
+    [3, {
+      buffers: [{ byteLength: 16 }],
+      bufferViews: [{ buffer: 0, byteLength: 3 }],
+      tileAvailability: { bitstream: 0 },
+      childSubtreeAvailability: { constant: 0 },
+    }, Buffer.from([0x21, 0, 0, ...Array(13).fill(0)]), "SUBTREE_TILE_PARENT_UNAVAILABLE"],
+    [2, {
+      buffers: [{ byteLength: 16 }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 1 },
+        { buffer: 0, byteOffset: 8, byteLength: 2 },
+      ],
+      tileAvailability: { bitstream: 0 },
+      childSubtreeAvailability: { bitstream: 1 },
+    }, Buffer.from([1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]),
+    "SUBTREE_CHILD_PARENT_UNAVAILABLE"],
+  ]) {
+    await temporary(async (dir) => {
+      await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+      await writeFile(join(dir, "subtrees", "0", "0", "0.subtree"), subtree(document, binary));
+      await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+        implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels,
+          availableLevels: 5, subtrees: { uri: "subtrees/{level}/{x}/{y}.subtree" } },
+      })));
+      const report = await validateTileset(dir);
+      assert.ok(codes(report).includes(expectedCode), expectedCode);
+      assert.ok(!codes(report).includes("RESOURCE_MISSING"));
+    });
+  }
+});
+
+test("checks availability bit lengths, padding, counts, and traversal bounds", async () => {
+  for (const [document, binary, expectedCode] of [
+    [{ buffers: [{ byteLength: 16 }], bufferViews: [{ buffer: 0, byteLength: 8 }],
+      tileAvailability: { bitstream: 0 }, childSubtreeAvailability: { constant: 0 } },
+      Buffer.alloc(16), "SUBTREE_BITSTREAM_LENGTH"],
+    [{ buffers: [{ byteLength: 8 }], bufferViews: [{ buffer: 0, byteLength: 1 }],
+      tileAvailability: { bitstream: 0 }, childSubtreeAvailability: { constant: 0 } },
+      Buffer.from([0x80, 0, 0, 0, 0, 0, 0, 0]), "SUBTREE_BITSTREAM_PADDING"],
+    [{ buffers: [{ byteLength: 8 }], bufferViews: [{ buffer: 0, byteLength: 1 }],
+      tileAvailability: { bitstream: 0, availableCount: 0 }, childSubtreeAvailability: { constant: 0 } },
+      Buffer.from([1, 0, 0, 0, 0, 0, 0, 0]), "SUBTREE_AVAILABLE_COUNT"],
+  ]) {
+    await temporary(async (dir) => {
+      await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+      await writeFile(join(dir, "subtrees", "0", "0", "0.subtree"), subtree(document, binary));
+      await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+        implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+          availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.subtree" } },
+      })));
+      assert.ok(codes(await validateTileset(dir)).includes(expectedCode), expectedCode);
+    });
+  }
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      tileAvailability: { constant: 1 }, childSubtreeAvailability: { constant: 0 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 1000000,
+        availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    assert.ok(codes(await validateTileset(dir, { maxFileBytes: 128 }))
+      .includes("SUBTREE_AVAILABILITY_LIMIT"));
+  });
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    const bytes = Buffer.alloc(24);
+    bytes.write("subt", 0, 4, "ascii");
+    bytes.writeUInt32LE(1, 4);
+    bytes.writeBigUInt64LE((1n << 63n), 8);
+    await writeFile(join(dir, "subtrees", "0", "0", "0.subtree"), bytes);
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 1,
+        availableLevels: 2, subtrees: { uri: "subtrees/{level}/{x}/{y}.subtree" } },
+    })));
+    assert.ok(codes(await validateTileset(dir)).includes("JSON_LIMIT"));
+  });
+});
+
+test("rejects availability beyond availableLevels while allowing longer subtrees", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      tileAvailability: { constant: 1 }, childSubtreeAvailability: { constant: 0 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+        availableLevels: 1, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    assert.ok(codes(await validateTileset(dir)).includes("SUBTREE_LEVEL_AVAILABILITY"));
   });
 });
 
@@ -481,6 +777,43 @@ test("checks JSON subtree buffer URIs against the input root", async () => {
         availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
     })));
     assert.ok(codes(await validateTileset(dir)).includes("URI_ESCAPE"));
+  });
+});
+
+test("reads availability bitstreams from bounded local external buffers", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    const binary = Buffer.alloc(8);
+    binary[0] = 1;
+    await writeFile(join(dir, "subtrees", "0", "0", "availability.bin"), binary);
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      buffers: [{ uri: "availability.bin", byteLength: 8 }],
+      bufferViews: [{ buffer: 0, byteLength: 1 }],
+      tileAvailability: { bitstream: 0 },
+      childSubtreeAvailability: { constant: 0 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+        availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    const report = await validateTileset(dir);
+    assert.equal(report.valid, true, JSON.stringify(report.issues));
+    assert.equal(report.stats.resources, 2);
+    assert.ok(report.coverage.checked.some((entry) => entry.kind === "subtree-buffer"));
+  });
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      buffers: [{ uri: "missing.bin", byteLength: 8 }],
+      bufferViews: [{ buffer: 0, byteLength: 1 }],
+      tileAvailability: { bitstream: 0 },
+      childSubtreeAvailability: { constant: 0 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+        availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+    })));
+    assert.ok(codes(await validateTileset(dir)).includes("RESOURCE_MISSING"));
   });
 });
 

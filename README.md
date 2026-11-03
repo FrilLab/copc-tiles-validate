@@ -61,7 +61,7 @@ The report contains `valid`, `passed`, `coverage`, `conformance: "partial"`, `is
 - Basic tileset and tile structure for 3D Tiles 1.0 and 1.1, including asset version, geometric error, bounding volumes, transforms, refine values, children, and content URI fields.
 - Local resource references, including missing files, external tileset JSON, cycles, path traversal, and symlink escapes outside the input directory.
 - GLB 2.0 container structure, JSON asset version, chunk order and bounds, embedded buffer length, and local external-buffer references. GLB content is also identified by magic when its URI has no `.glb` suffix.
-- Implicit tiling configuration and URI templates; structural checks of the root JSON or binary subtree and its availability objects.
+- Implicit tiling configuration and URI templates; bounded traversal of reachable local subtrees, exact availability bitstream lengths and padding, available counts, parent/content relationships, and available content resources.
 - Configurable limits for tile count, traversal depth, JSON size, resource count, file size, and diagnostic count.
 
 ## Known limitations
@@ -69,7 +69,7 @@ The report contains `valid`, `passed`, `coverage`, `conformance: "partial"`, `is
 This package performs partial structural checks:
 
 - It does not perform full glTF, accessor, mesh, extension, or metadata semantic validation.
-- It checks only the root implicit subtree. It does not traverse deeper subtrees or fully verify availability bit counts and cross-subtree semantics.
+- Implicit subtree and content traversal is limited by `maxDepth`, `maxTiles`, `maxResources`, and `maxFileBytes`. Availability bitstreams are checked structurally, but tile bounding volumes are not expanded and subtree metadata semantics are not validated.
 - It does not parse 3TZ or `.3dtiles` package archives.
 - Legacy B3DM, I3DM, PNTS, CMPT, standalone `.gltf`, and custom content formats are not fully checked; referenced files of these formats receive a warning.
 - Remote, signed, query-bearing, and data URIs are not fetched.

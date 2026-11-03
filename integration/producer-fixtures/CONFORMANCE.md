@@ -23,19 +23,16 @@ report retains issue types/codes and severities for diagnosis.
 | --- | --- | --- |
 | Tileset JSON structure, bounding volumes, geometric errors, local resource references | Structural checks implemented by the local API | Compare local tileset accept/reject with CesiumGS accept/reject. |
 | GLB container and embedded buffer bounds | GLB header, length, chunk layout, asset version, and buffer bounds | Compare local GLB-container accept/reject only when the local report records `glb-container` coverage. Without that record, mark the local result `unverified` and the comparison `unsupported-standard-rule`. Khronos also checks glTF semantics, which the local validator reports as unverified. |
-| Implicit tiling and subtree | Root implicit configuration, root subtree container/JSON, and selected availability structure; deeper traversal and full availability semantics remain partial | Record CesiumGS result against local result. Implicit URI-template GLBs are checked directly by Khronos but are marked locally `unverified` because the local validator does not traverse those instances. |
+| Implicit tiling and subtree | Reachable local subtrees, availability bitstream bounds/counts/relationships, and available content URI instances are checked within configured limits; metadata semantics remain unsupported | Compare CesiumGS accept/reject and Khronos GLB outcomes with the local checks. |
 | Unknown extensions or content formats | Unsupported semantics are warned or skipped and appear in coverage | Record both judgments and classify mismatches as an unsupported standard rule. Do not treat skipped local coverage as a completed check. |
 
 ## Fixture classes
 
-- `valid-supported-assets`: pinned producer explicit tileset and its GLBs.
+- `valid-supported-assets`: pinned producer explicit and implicit tilesets, reachable subtrees, and their GLBs.
 - `malformed-supported-structure`: generated GLB/tileset/subtree files mutated
   to violate a local structural rule.
 - `unsupported-extension-or-format`: generated producer output with an
   extension whose semantics the local validator does not implement.
-- `ambiguous-semantics`: producer-generated implicit output. The local
-  validator intentionally reports partial subtree/content semantics while the
-  official validator performs its broader validation.
 
 The checked-in `conformance-baseline.json` records expected outcomes and the
 expected classification for each comparison. A new tool version or producer
