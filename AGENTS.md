@@ -1,7 +1,7 @@
 # Agent Instructions — Lightweight 3D Tiles Validator
 
 - This repository is being repurposed from `copc-tiles` to `copc-tiles-validate`.
-- Mission: reusable, source-neutral, lightweight **structural** 3D Tiles validation. Do not import COPC Adapter, Cesium, the standalone Tiles generator, or native dependencies.
+- Mission: reusable, source-neutral, lightweight **structural** 3D Tiles validation. Do not import COPC Adapter, Cesium, the standalone Tiles generator, or native dependencies in the validator runtime or default test suite. Issue #24 has a scoped exception for its isolated `integration/producer-fixtures` package: it may use pinned public COPC Adapter Core and Tiles artifacts in a separate CI job to generate fixtures. Keep those dependencies out of the root package and the Node 22/24/26 validator matrix.
 - Keep the API portable for Node 22, 24, and 26; use built-in Node modules.
 - Maintain honest limitations: the checker is not equivalent to the official CesiumGS 3D Tiles Validator or Khronos glTF Validator.
 - Validate malicious/invalid inputs without trusting URIs, binary lengths, unbounded trees, or links outside the input root.

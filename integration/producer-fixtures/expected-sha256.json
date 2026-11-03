@@ -1,0 +1,21 @@
+{
+  "producer": {
+    "@frillab/copc-adapter": {
+      "version": "0.7.1",
+      "integrity": "sha512-apm67tKwhOr41elWw845NaYJrMsz74oXWtD7ZEMntLkUaFhos0uM/EMsVBNOEwXg77JjN363hQi70hTOLD7yJQ=="
+    },
+    "@frillab/copc-tiles": {
+      "version": "0.1.0",
+      "integrity": "sha512-8WDrUAhQc4BCl0dGiJMe+NEv4DBXmiqWvPLWHvL5XUk5K5orU0B0MZTEeLTs8ABAn2Pj4K964ZX+peQlU0vOxg=="
+    }
+  },
+  "artifacts": {
+    "explicit/tileset.json": "5ccc61353f52334b38f321fe045147d94eec4109efb137d80c684e082e4ae598",
+    "explicit/content/302d302d302d30.glb": "351f328eceb851432473695ef6a8490efebbed6ed83f1c26f3f2bd2ce6b9d477",
+    "explicit/content/312d302d302d30.glb": "27b78f3d0b4e2c36cedd466c7597644a2d55e5ee6bd0632f4f42bc53107537ea",
+    "implicit/tileset.json": "648d30f9e4a0789cc0b1aa0b1afd1c2801a29d5923cf1097579e9ec88ab8508a",
+    "implicit/subtrees/0/0/0/0.subtree": "9a573c2f988f468e7741422c6a1fc92442fd2364256dc3e2e7e9f669b8fc35bc",
+    "implicit/content/0/0/0/0.glb": "5873af2054c0b5fc4740d6fa17afd25bf8d10beea3f18755dba150f35ddf5adc",
+    "implicit/content/1/0/0/0.glb": "8d8ed4b195372cc8f40c310e7f04c4ebac5296d5a09c1da080873e45131afb57"
+  }
+}
