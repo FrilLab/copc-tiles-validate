@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { open, readFile, realpath, stat } from "node:fs/promises";
 import { inspectGlb, inspectSubtree } from "./formats.js";
 
 const DEFAULTS = Object.freeze({
@@ -10,6 +10,7 @@ const DEFAULTS = Object.freeze({
   maxResources: 100000,
   maxIssues: 500,
   checkContent: true,
+  failOnUnverified: false,
 });
 
 function record(value) {
@@ -24,6 +25,24 @@ function nonnegative(value) {
 function within(root, candidate) {
   const rel = path.relative(root, candidate);
   return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel));
+}
+
+async function sniffResource(file) {
+  const handle = await open(file, "r");
+  try {
+    const buffer = Buffer.alloc(4096);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const prefix = buffer.subarray(0, bytesRead);
+    const text = prefix.toString("utf8");
+    const first = text.search(/\S/);
+    return {
+      magic: prefix.toString("ascii", 0, Math.min(4, bytesRead)),
+      tilesetLike: first >= 0 && text[first] === "{" &&
+        ['"asset"', '"root"', '"geometricError"'].some((key) => text.includes(key)),
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 function volume(value, location, ctx) {
@@ -66,15 +85,40 @@ function validateUriTemplate(uri, scheme, location, ctx) {
   if (tags.some((tag) => !uri.includes(tag))) {
     ctx.error("IMPLICIT_TEMPLATE", location, "Template must contain " + tags.join(", "));
   }
+  const found = [...uri.matchAll(/\{([^{}]*)\}/g)];
+  const allowed = new Set(tags);
+  if (/[{}]/.test(uri.replace(/\{[^{}]*\}/g, "")) ||
+      found.some((match) => !allowed.has("{" + match[1] + "}"))) {
+    ctx.error("IMPLICIT_TEMPLATE", location, "Template contains malformed or unsupported placeholders");
+  }
 }
 
 function makeContext(options) {
   const issues = [];
   const stats = { tilesets: 0, tiles: 0, resources: 0, glbs: 0, subtrees: 0 };
+  const coverage = new Map();
   const ctx = {
     options, issues, stats, stopped: false,
     error: (code, location, message) => append("ERROR", code, location, message),
     warn: (code, location, message) => append("WARNING", code, location, message),
+    cover: (status, kind, location, reason) => {
+      const key = [status, kind, reason ?? ""].join("\u0000");
+      let entry = coverage.get(key);
+      if (!entry) {
+        entry = { status, kind, count: 0, ...(reason ? { reason } : {}), paths: [] };
+        coverage.set(key, entry);
+      }
+      entry.count++;
+      if (entry.paths.length < 5 && !entry.paths.includes(location)) entry.paths.push(location);
+    },
+    coverageReport: () => {
+      const entries = [...coverage.values()];
+      const checked = entries.filter((entry) => entry.status === "checked");
+      const partial = entries.filter((entry) => entry.status === "partial");
+      const skipped = entries.filter((entry) => entry.status === "skipped");
+      const status = skipped.length > 0 ? "incomplete" : partial.length > 0 ? "partial" : "complete";
+      return { status, checked, partial, skipped };
+    },
   };
   function append(severity, code, location, message) {
     if (ctx.stopped) return;
@@ -99,6 +143,9 @@ function validateOptions(input) {
   if (typeof options.checkContent !== "boolean") {
     throw new TypeError("checkContent must be boolean");
   }
+  if (typeof options.failOnUnverified !== "boolean") {
+    throw new TypeError("failOnUnverified must be boolean");
+  }
   return options;
 }
 
@@ -108,7 +155,7 @@ function validateOptions(input) {
  *
  * @param {string} inputPath Path to tileset.json or a directory containing it
  * @param {object} [userOptions] Optional resource and traversal limits
- * @returns {Promise<{valid:boolean,issues:Array,stats:object,conformance:"partial"}>}
+ * @returns {Promise<{valid:boolean,passed:boolean,issues:Array,stats:object,coverage:object,conformance:"partial"}>}
  */
 export async function validateTileset(inputPath, userOptions = {}) {
   if (typeof inputPath !== "string" || inputPath.length === 0) {
@@ -137,19 +184,31 @@ export async function validateTileset(inputPath, userOptions = {}) {
   const scanned = new Set();
   const active = new Set();
   const resources = new Set();
+  let contentCheckSkipped = false;
 
   async function locate(raw, origin, location) {
     if (typeof raw !== "string" || raw.length === 0) {
       ctx.error("URI", location, "Resource URI must be a nonempty string");
       return null;
     }
-    if (/^https?:\/\//i.test(raw) || /^data:/i.test(raw)) {
-      ctx.warn("REMOTE_UNVERIFIED", location, "External resources are not fetched");
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//")) {
+      ctx.warn("EXTERNAL_UNVERIFIED", location, "External URI resources are not fetched");
+      ctx.cover("skipped", "resource", location, "External URI resource is not fetched");
       return null;
     }
-    if (raw.includes("?") || raw.includes("#") || raw.includes("\\") ||
-        /^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-      ctx.error("URI_UNSUPPORTED", location, "Unsupported URI scheme, query, fragment, or backslash");
+    if (raw.startsWith("/")) {
+      ctx.warn("EXTERNAL_UNVERIFIED", location, "Absolute URI paths are not resolved against the local input root");
+      ctx.cover("skipped", "resource", location, "Absolute URI path is outside local relative-resource checking");
+      return null;
+    }
+    if (raw.includes("?") || raw.includes("#")) {
+      ctx.warn("URI_REFERENCE_UNVERIFIED", location, "Query and fragment URI references are not resolved locally");
+      ctx.cover("skipped", "resource", location, "Query or fragment prevents local resource resolution");
+      return null;
+    }
+    if (raw.includes("\\")) {
+      ctx.error("URI_BACKSLASH", location, "Resource URI must use forward slashes");
+      ctx.cover("skipped", "resource", location, "Unsupported URI syntax or scheme");
       return null;
     }
     let decoded;
@@ -159,7 +218,7 @@ export async function validateTileset(inputPath, userOptions = {}) {
       ctx.error("URI_ENCODING", location, "Malformed URI encoding");
       return null;
     }
-    if (decoded.includes("%") || decoded.includes("\\") || decoded.includes("\0") ||
+    if (decoded.includes("\\") || decoded.includes("\0") ||
         path.isAbsolute(decoded) || decoded.startsWith("//")) {
       ctx.error("URI_UNSAFE", location, "Unsafe or ambiguous relative resource URI");
       return null;
@@ -191,15 +250,32 @@ export async function validateTileset(inputPath, userOptions = {}) {
     }
   }
 
+  ctx.checkReference = async (raw, origin, location) => {
+    const target = await locate(raw, origin, location);
+    if (!target) return null;
+    if (!resources.has(target)) {
+      if (resources.size >= options.maxResources) {
+        ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
+        return null;
+      }
+      resources.add(target);
+      ctx.stats.resources++;
+    }
+    ctx.cover("checked", "local-resource-reference", location,
+      "Relative resource URI resolves to a regular file inside the input root");
+    return target;
+  };
+
   async function resource(uri, origin, location, kind = "content") {
-    if (ctx.stopped || !options.checkContent) return;
+    if (ctx.stopped) return;
+    if (!options.checkContent) {
+      contentCheckSkipped = true;
+      return;
+    }
     const target = await locate(uri, origin, location);
     if (!target) return;
     const suffix = path.extname(target).toLowerCase();
-    if (suffix === ".json" && kind === "content") {
-      await tileset(target);
-      return;
-    }
+    const sniffed = suffix === ".glb" || suffix === ".subtree" ? null : await sniffResource(target);
     if (resources.has(target)) return;
     if (resources.size >= options.maxResources) {
       ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
@@ -208,22 +284,28 @@ export async function validateTileset(inputPath, userOptions = {}) {
     resources.add(target);
     ctx.stats.resources++;
     try {
-      if (suffix === ".glb") {
-        ctx.stats.glbs++;
-        await inspectGlb(target, ctx);
-      } else if (suffix === ".subtree") {
+      if (kind === "subtree" || suffix === ".subtree") {
         ctx.stats.subtrees++;
         await inspectSubtree(target, ctx);
+      } else if (suffix === ".glb" || sniffed?.magic === "glTF") {
+        ctx.stats.glbs++;
+        await inspectGlb(target, ctx);
+      } else if (suffix === ".json" && kind === "content") {
+        await tileset(target);
+      } else if (suffix !== ".gltf" && sniffed?.tilesetLike) {
+        await tileset(target);
       } else {
         ctx.warn("CONTENT_FORMAT_UNVERIFIED", location,
-          "Referenced content exists but its format is not structurally checked: " + suffix);
+          "Referenced content exists, but its format is not identified or structurally checked");
+        ctx.cover("skipped", "content-format", location,
+          "No structural checker matched the resource format");
       }
     } catch (cause) {
       ctx.error("RESOURCE_READ", location, "Could not inspect resource: " + (cause.code ?? cause.message));
     }
   }
 
-  async function tile(node, location, depth, source) {
+  async function tile(node, location, depth, source, version, extensionsUsed, groupCount) {
     if (ctx.stopped) return;
     if (depth > options.maxDepth || ctx.stats.tiles >= options.maxTiles) {
       ctx.error("TILE_LIMIT", location, "Tile depth or count limit reached");
@@ -234,19 +316,33 @@ export async function validateTileset(inputPath, userOptions = {}) {
       ctx.error("TILE", location, "Tile must be an object");
       return;
     }
+    ctx.cover("checked", "tile-structure", location, "Tile object fields and local tree structure");
+    if (node.metadata !== undefined) {
+      ctx.warn("TILE_METADATA_UNVERIFIED", location, "Tile metadata semantics are not checked");
+      ctx.cover("skipped", "tile-metadata", location, "Tile metadata semantics are not checked");
+    }
     volume(node.boundingVolume, location + "/boundingVolume", ctx);
     if (!nonnegative(node.geometricError)) {
       ctx.error("GEOMETRIC_ERROR", location + "/geometricError", "Expected a finite nonnegative number");
     }
     if (node.refine !== undefined && node.refine !== "ADD" && node.refine !== "REPLACE") {
       ctx.error("REFINE", location + "/refine", "refine must be ADD or REPLACE");
+    } else if (depth === 0 && node.refine === undefined) {
+      ctx.error("REFINE_REQUIRED", location + "/refine", "Root tile must define refine");
     }
-    if (node.transform !== undefined &&
-        (!Array.isArray(node.transform) || node.transform.length !== 16 || !node.transform.every(finite))) {
-      ctx.error("TRANSFORM", location + "/transform", "Expected 16 finite matrix values");
+    if (node.transform !== undefined) {
+      if (!Array.isArray(node.transform) || node.transform.length !== 16 || !node.transform.every(finite)) {
+        ctx.error("TRANSFORM", location + "/transform", "Expected 16 finite matrix values");
+      } else if (node.transform[3] !== 0 || node.transform[7] !== 0 ||
+          node.transform[11] !== 0 || node.transform[15] !== 1) {
+        ctx.error("TRANSFORM_AFFINE", location + "/transform", "Transform must be an affine 4x4 matrix");
+      }
     }
     const implicit = node.implicitTiling ?? node.extensions?.["3DTILES_implicit_tiling"];
     if (implicit !== undefined) {
+      if (version === "1.0" && !extensionsUsed.includes("3DTILES_implicit_tiling")) {
+        ctx.error("IMPLICIT_EXTENSION", location, "3D Tiles 1.0 implicit tiling must be declared in extensionsUsed");
+      }
       if (!record(implicit)) {
         ctx.error("IMPLICIT", location, "implicitTiling must be an object");
       } else {
@@ -255,7 +351,9 @@ export async function validateTileset(inputPath, userOptions = {}) {
           ctx.error("IMPLICIT_SCHEME", location, "Expected QUADTREE or OCTREE");
         }
         if (!Number.isSafeInteger(implicit.subtreeLevels) || implicit.subtreeLevels < 1 ||
-            !Number.isSafeInteger(implicit.availableLevels) || implicit.availableLevels < 1) {
+            !Number.isSafeInteger(implicit.availableLevels) || implicit.availableLevels < 1 ||
+            (Number.isSafeInteger(implicit.subtreeLevels) && Number.isSafeInteger(implicit.availableLevels) &&
+             implicit.subtreeLevels > implicit.availableLevels)) {
           ctx.error("IMPLICIT_LEVELS", location, "Invalid subtreeLevels or availableLevels");
         }
         const template = implicit.subtrees?.uri ?? implicit.subtrees?.url;
@@ -267,6 +365,8 @@ export async function validateTileset(inputPath, userOptions = {}) {
           await resource(rootSubtree, source, location + "/implicitTiling/rootSubtree", "subtree");
           ctx.warn("IMPLICIT_PARTIAL", location,
             "Only root subtree file is checked; deeper subtree availability is not traversed");
+          ctx.cover("partial", "implicit-tree", location,
+            "Only the root subtree is inspected; deeper subtree links and availability are not traversed");
         }
       }
       if (node.children !== undefined) {
@@ -274,10 +374,17 @@ export async function validateTileset(inputPath, userOptions = {}) {
       }
     }
     const contents = [];
+    if (node.content !== undefined && node.contents !== undefined) {
+      ctx.error("CONTENT_COLLECTION", location, "A tile cannot define both content and contents");
+    }
     if (node.content !== undefined) contents.push(node.content);
     if (node.contents !== undefined) {
-      if (!Array.isArray(node.contents)) ctx.error("CONTENTS", location, "contents must be an array");
-      else contents.push(...node.contents);
+      if (!Array.isArray(node.contents) || node.contents.length === 0) {
+        ctx.error("CONTENTS", location, "contents must be a nonempty array");
+      } else contents.push(...node.contents);
+      if (version === "1.0" && !extensionsUsed.includes("3DTILES_multiple_contents")) {
+        ctx.error("CONTENTS_VERSION", location, "contents requires 3D Tiles 1.1 or the multiple contents extension");
+      }
     }
     for (let i = 0; i < contents.length; i++) {
       const content = contents[i];
@@ -288,12 +395,25 @@ export async function validateTileset(inputPath, userOptions = {}) {
       if (content.boundingVolume !== undefined) {
         volume(content.boundingVolume, location + "/contents/" + i + "/boundingVolume", ctx);
       }
+      if (content.group !== undefined &&
+          (!Number.isSafeInteger(content.group) || content.group < 0 || content.group >= groupCount)) {
+        ctx.error("CONTENT_GROUP", location + "/contents/" + i + "/group",
+          "content.group must reference an existing tileset group");
+      }
+      if (content.metadata !== undefined) {
+        ctx.warn("CONTENT_METADATA_UNVERIFIED", location + "/contents/" + i,
+          "Content metadata semantics are not checked");
+        ctx.cover("skipped", "content-metadata", location + "/contents/" + i,
+          "Content metadata semantics are not checked");
+      }
       const uri = content.uri ?? content.url;
       if (typeof uri !== "string" || uri.length === 0) {
         ctx.error("CONTENT_URI", location + "/contents/" + i, "Content uri/url is required");
       } else if (implicit !== undefined) {
         ctx.warn("IMPLICIT_CONTENT_UNVERIFIED", location + "/contents/" + i,
           "Implicit content URI template instances are not traversed");
+        ctx.cover("skipped", "implicit-content", location + "/contents/" + i,
+          "Content URI template instances are not traversed");
       } else {
         await resource(uri, source, location + "/contents/" + i);
       }
@@ -303,7 +423,8 @@ export async function validateTileset(inputPath, userOptions = {}) {
         ctx.error("CHILDREN", location + "/children", "children must be an array");
       } else {
         for (let i = 0; i < node.children.length; i++) {
-          await tile(node.children[i], location + "/children/" + i, depth + 1, source);
+          await tile(node.children[i], location + "/children/" + i, depth + 1,
+            source, version, extensionsUsed, groupCount);
           if (ctx.stopped) return;
         }
       }
@@ -337,13 +458,66 @@ export async function validateTileset(inputPath, userOptions = {}) {
         ctx.error("TILESET_ASSET", file, "Expected asset.version 1.0 or 1.1");
       }
       if (!record(json)) return;
+      ctx.cover("checked", "tileset-json", file, "Tileset JSON fields and declared version");
+      if (json.schema !== undefined && json.schemaUri !== undefined) {
+        ctx.error("TILESET_SCHEMA", file, "schema and schemaUri are mutually exclusive");
+      }
+      for (const field of ["extensionsUsed", "extensionsRequired"]) {
+        if (json[field] !== undefined && (!Array.isArray(json[field]) || json[field].length === 0 ||
+            json[field].some((value) => typeof value !== "string" || value.length === 0) ||
+            new Set(json[field]).size !== json[field].length)) {
+          ctx.error("TILESET_EXTENSIONS", file + "#/" + field,
+            field + " must be a nonempty array of unique nonempty extension names");
+        }
+      }
+      const extensionsUsed = Array.isArray(json.extensionsUsed) ? json.extensionsUsed : [];
+      const recognizedExtensions = new Set(["3DTILES_implicit_tiling", "3DTILES_multiple_contents"]);
+      for (const extension of extensionsUsed) {
+        if (typeof extension === "string" && !recognizedExtensions.has(extension)) {
+          ctx.warn("EXTENSION_UNVERIFIED", file + "#/extensionsUsed",
+            "Extension semantics are not checked: " + extension);
+          ctx.cover("skipped", "extension", file + "#/extensionsUsed",
+            "No structural checker is implemented for extension " + extension);
+        }
+      }
+      if (Array.isArray(json.extensionsRequired)) {
+        const used = Array.isArray(json.extensionsUsed) ? json.extensionsUsed : [];
+        for (const extension of json.extensionsRequired) {
+          if (!used.includes(extension)) {
+            ctx.error("TILESET_EXTENSIONS_REQUIRED", file + "#/extensionsRequired",
+              "Every required extension must also appear in extensionsUsed");
+            break;
+          }
+        }
+      }
+      let groupCount = 0;
+      if (json.groups !== undefined) {
+        if (!Array.isArray(json.groups) || json.groups.length === 0) {
+          ctx.error("TILESET_GROUPS", file + "#/groups", "groups must be a nonempty array when present");
+        } else {
+          groupCount = json.groups.length;
+        }
+      }
+      if (["schema", "schemaUri", "metadata", "statistics", "properties"].some((key) => json[key] !== undefined) ||
+          json.groups !== undefined) {
+        ctx.warn("TILESET_METADATA_UNVERIFIED", file,
+          "Tileset metadata and schema semantics are not structurally validated");
+        ctx.cover("skipped", "tileset-metadata", file,
+          "Tileset metadata, statistics, groups, or schema semantics are not checked");
+      }
+      if (typeof json.schemaUri === "string") {
+        await ctx.checkReference(json.schemaUri, file, file + "#/schemaUri");
+      } else if (json.schemaUri !== undefined && typeof json.schemaUri !== "string") {
+        ctx.error("TILESET_SCHEMA_URI", file + "#/schemaUri", "schemaUri must be a string");
+      }
       if (!nonnegative(json.geometricError)) {
         ctx.error("TILESET_GEOMETRIC_ERROR", file, "Expected finite nonnegative geometricError");
       }
       if (json.root === undefined) {
         ctx.error("TILESET_ROOT", file, "Missing root tile");
       } else {
-        await tile(json.root, file + "#/root", 0, file);
+        await tile(json.root, file + "#/root", 0, file, json.asset?.version,
+          extensionsUsed, groupCount);
       }
     } catch (cause) {
       ctx.error("TILESET_IO", file, "Could not read tileset: " + (cause.code ?? cause.message));
@@ -362,18 +536,23 @@ export async function validateTileset(inputPath, userOptions = {}) {
   } catch {
     ctx.error("INPUT_IO", entry, "Tileset file cannot be opened");
   }
-  if (!options.checkContent) {
+  if (!options.checkContent && contentCheckSkipped) {
     ctx.warn("CONTENT_SKIPPED", entry, "Content checking was disabled");
+    ctx.cover("skipped", "content", entry, "Content checking was disabled by option");
   }
   return result(ctx);
 }
 
 function result(ctx) {
+  const coverage = ctx.coverageReport();
+  const valid = !ctx.issues.some((issue) => issue.severity === "ERROR");
   return {
-    valid: !ctx.issues.some((issue) => issue.severity === "ERROR"),
+    valid,
+    passed: valid && (!ctx.options.failOnUnverified || coverage.status === "complete"),
     conformance: "partial",
     issues: ctx.issues,
     stats: ctx.stats,
+    coverage,
   };
 }
 

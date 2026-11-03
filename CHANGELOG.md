@@ -13,6 +13,8 @@ Notable changes to this project are recorded here. There are no published valida
 - Initial dependency-free Node.js library and CLI for partial structural validation of local 3D Tiles 1.0 and 1.1 tilesets.
 - Checks for basic tileset and tile structure, bounding volumes, local resource references, GLB 2.0 containers, and root implicit subtree structure.
 - Configurable limits for input sizes, resources, tile count, traversal depth, and issue reporting.
+- Machine-readable checked, partial, and skipped coverage, with opt-in fail-on-unverified behavior in the API and CLI.
+- Hardened GLB chunk ordering and buffer bounds, subtree JSON/binary buffer checks, tileset collections and extension declarations, affine transforms, and URI containment.
 - Positive and negative regression coverage for supported validation behavior and unsafe or malformed inputs.
 
 ### Limitations
