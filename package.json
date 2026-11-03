@@ -1,93 +1,31 @@
 {
-  "name": "@frillab/copc-tiles",
+  "name": "@frillab/copc-tiles-validate",
   "version": "0.1.0",
+  "description": "Dependency-free structural validation for general 3D Tiles assets",
   "type": "module",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "engines": {
-    "node": ">=18"
-  },
   "license": "Apache-2.0",
-  "description": "Source-neutral 3D Tiles 1.1 engine for point clouds",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/FrilLab/copc-tiles.git"
+  "engines": {
+    "node": ">=22.12.0"
   },
-  "homepage": "https://github.com/FrilLab/copc-tiles#readme",
-  "bugs": {
-    "url": "https://github.com/FrilLab/copc-tiles/issues"
+  "bin": {
+    "copc-tiles-validate": "./src/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
   },
   "files": [
-    "dist/",
-    "docs/",
-    "README.md",
+    "src/",
     "LICENSE",
-    "CHANGELOG.md"
+    "NOTICE.md",
+    "README.md"
   ],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./adapter/copc-core": {
-      "types": "./dist/adapter/copcCoreAdapter.d.ts",
-      "import": "./dist/adapter/copcCoreAdapter.js"
-    },
-    "./resources": {
-      "types": "./dist/resources/index.d.ts",
-      "import": "./dist/resources/index.js"
-    },
-    "./tileset": {
-      "types": "./dist/tileset/explicitTileset.d.ts",
-      "import": "./dist/tileset/explicitTileset.js"
-    },
-    "./tileset/implicit": {
-      "types": "./dist/tileset/implicitOctreeTileset.d.ts",
-      "import": "./dist/tileset/implicitOctreeTileset.js"
-    }
-  },
-  "sideEffects": false,
   "scripts": {
-    "test": "node --import tsx --test test/*.test.mjs",
-    "typecheck": "tsc --noEmit",
-    "typecheck:adapter-core": "tsc --noEmit -p tsconfig.adapter-core.json",
-    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
-    "prepack": "npm run build",
-    "validate:gltf": "node --import tsx --test test/pointCloudGlb.test.mjs",
-    "validate:tileset": "node --import tsx --test test/explicitTileset.test.mjs",
-    "validate:implicit": "node --import tsx --test test/implicitOctreeTileset.test.mjs",
-    "validate:resources": "node --import tsx --test test/tileResourceServer.test.mjs",
-    "test:browser": "playwright test --config test/browser/playwright.config.mjs",
-    "validate:adapter-integration": "playwright test --config test/browser/playwright.config.mjs test/browser/adapter.real.spec.mjs",
-    "test:packed-consumer": "node scripts/test-packed-consumer.mjs",
-    "test:migration-staging": "node scripts/test-migration-staging.mjs",
-    "verify": "node scripts/test-migration-staging.mjs",
-    "bench:engine": "node --expose-gc --import tsx bench/engine.mjs"
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check src/cli.js && node --check src/validator.js && node --check src/formats.js",
+    "verify": "npm run check && npm test"
   },
-  "peerDependencies": {
-    "@frillab/copc-adapter": "0.7.1"
-  },
-  "peerDependenciesMeta": {
-    "@frillab/copc-adapter": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@frillab/copc-adapter": "0.7.1",
-    "@playwright/test": "1.64.1",
-    "3d-tiles-renderer": "0.5.3",
-    "3d-tiles-validator": "0.6.1",
-    "cesium": "1.146.0",
-    "gltf-validator": "2.0.0-dev.3.10",
-    "three": "0.186.1",
-    "tsx": "^4.23.13",
-    "typescript": "~5.9.3",
-    "vite": "7.3.7"
-  },
-  "allowScripts": {
-    "better-sqlite3@11.10.0": true,
-    "esbuild@0.28.2": true,
-    "fsevents@2.3.3": true,
-    "sharp@0.32.6": true
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FrilLab/copc-tiles-validate.git"
   }
 }
