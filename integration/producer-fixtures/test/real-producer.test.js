@@ -327,10 +327,10 @@ async function makeCases(root, generated) {
     },
     {
       name: "implicit valid output", source: generated.implicitDirectory, expectedValid: true,
-      category: "ambiguous-semantics",
+      category: "valid-supported-assets",
       compareGlbSemantics: true,
-      expectedCode: null, expectedWarnings: ["SUBTREE_SEMANTICS_UNVERIFIED", "IMPLICIT_PARTIAL", "IMPLICIT_CONTENT_UNVERIFIED"],
-      expectedStats: { subtrees: 1, tiles: 1 },
+      expectedCode: null, expectedWarnings: ["GLTF_SEMANTICS_UNVERIFIED"],
+      expectedStats: { subtrees: 1, tiles: 1, glbs: 2 },
     },
   ];
 
@@ -509,7 +509,7 @@ function classifyComparison(localOutcome, officialOutcome, category, applicable)
   if (officialOutcome === "unverified") return "official-tool-version-limitation";
   if (localOutcome === "unverified") return "unsupported-standard-rule";
   if (localOutcome === officialOutcome) return "agreement";
-  if (category === "unsupported-extension-or-format" || category === "ambiguous-semantics") {
+  if (category === "unsupported-extension-or-format") {
     return "unsupported-standard-rule";
   }
   return localOutcome === "reject" ? "validator-false-positive" : "validator-false-negative";

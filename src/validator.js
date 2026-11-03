@@ -75,22 +75,48 @@ function volume(value, location, ctx) {
   }
 }
 
-function validateUriTemplate(uri, scheme, location, ctx) {
+function validateUriTemplate(uri, scheme, location, ctx, kind = "subtree") {
   if (typeof uri !== "string" || uri.length === 0) {
-    ctx.error("IMPLICIT_URI", location, "Subtree URI template is required");
-    return;
+    ctx.error(kind === "content" ? "IMPLICIT_CONTENT_URI" : "IMPLICIT_URI", location,
+      (kind === "content" ? "Content" : "Subtree") + " URI template is required");
+    return false;
   }
   const tags = ["{level}", "{x}", "{y}"];
   if (scheme === "OCTREE") tags.push("{z}");
+  let valid = true;
   if (tags.some((tag) => !uri.includes(tag))) {
-    ctx.error("IMPLICIT_TEMPLATE", location, "Template must contain " + tags.join(", "));
+    ctx.error(kind === "content" ? "IMPLICIT_CONTENT_TEMPLATE" : "IMPLICIT_TEMPLATE",
+      location, "Template must contain " + tags.join(", "));
+    valid = false;
   }
   const found = [...uri.matchAll(/\{([^{}]*)\}/g)];
   const allowed = new Set(tags);
   if (/[{}]/.test(uri.replace(/\{[^{}]*\}/g, "")) ||
       found.some((match) => !allowed.has("{" + match[1] + "}"))) {
-    ctx.error("IMPLICIT_TEMPLATE", location, "Template contains malformed or unsupported placeholders");
+    ctx.error(kind === "content" ? "IMPLICIT_CONTENT_TEMPLATE" : "IMPLICIT_TEMPLATE",
+      location, "Template contains malformed or unsupported placeholders");
+    valid = false;
   }
+  return valid;
+}
+
+function mortonCoordinates(index, level, dimensions) {
+  const coordinates = Array.from({ length: dimensions }, () => 0n);
+  for (let bit = 0; bit < level; bit++) {
+    for (let axis = 0; axis < dimensions; axis++) {
+      if ((index & (1n << BigInt(bit * dimensions + axis))) !== 0n) {
+        coordinates[axis] |= 1n << BigInt(bit);
+      }
+    }
+  }
+  return coordinates;
+}
+
+function instantiateTemplate(template, level, x, y, z) {
+  return template.replaceAll("{level}", String(level))
+    .replaceAll("{x}", x.toString())
+    .replaceAll("{y}", y.toString())
+    .replaceAll("{z}", z.toString());
 }
 
 function makeContext(options) {
@@ -185,40 +211,13 @@ export async function validateTileset(inputPath, userOptions = {}) {
   const active = new Set();
   const resources = new Set();
   const inspectedResources = new Set();
-  const subtreeSummaries = new Map();
-  const checkedSubtreeContentCounts = new Map();
+  const subtreeQueue = [];
+  const queuedSubtrees = new Set();
+  const inspectedSubtrees = new Set();
+  let implicitContentChecks = 0;
+  let implicitAvailabilityChecks = 0;
+  let implicitAvailabilityLimitReported = false;
   let contentCheckSkipped = false;
-
-  function checkSubtreeContentCount(target, expectedContentCount) {
-    if (expectedContentCount === undefined) return;
-    let checkedCounts = checkedSubtreeContentCounts.get(target);
-    if (!checkedCounts) {
-      checkedCounts = new Set();
-      checkedSubtreeContentCounts.set(target, checkedCounts);
-    }
-    if (checkedCounts.has(expectedContentCount)) return;
-    checkedCounts.add(expectedContentCount);
-    const summary = subtreeSummaries.get(target);
-    if (!summary) return;
-    if (!summary.isArray) {
-      if (!summary.present && expectedContentCount > 0) {
-        ctx.error("SUBTREE_CONTENT_AVAILABILITY_MISSING", target,
-          "Subtree must define contentAvailability for each declared implicit content");
-      } else if (summary.present && expectedContentCount === 0) {
-        ctx.error("SUBTREE_CONTENT_AVAILABILITY_UNEXPECTED", target,
-          "contentAvailability must be omitted when the implicit root has no content templates");
-      }
-      return;
-    }
-    if (summary.length !== expectedContentCount) {
-      ctx.error("SUBTREE_CONTENT_AVAILABILITY_COUNT", target,
-        "contentAvailability entries must match the implicit root content count");
-    }
-    if (expectedContentCount === 0) {
-      ctx.error("SUBTREE_CONTENT_AVAILABILITY_UNEXPECTED", target,
-        "contentAvailability must be omitted when the implicit root has no content templates");
-    }
-  }
 
   async function locate(raw, origin, location) {
     if (typeof raw !== "string" || raw.length === 0) {
@@ -300,7 +299,7 @@ export async function validateTileset(inputPath, userOptions = {}) {
     return target;
   };
 
-  async function resource(uri, origin, location, kind = "content", formatOptions = {}) {
+  async function resource(uri, origin, location) {
     if (ctx.stopped) return;
     if (!options.checkContent) {
       contentCheckSkipped = true;
@@ -309,16 +308,11 @@ export async function validateTileset(inputPath, userOptions = {}) {
     const target = await locate(uri, origin, location);
     if (!target) return;
     const suffix = path.extname(target).toLowerCase();
-    const isSubtree = kind === "subtree" || suffix === ".subtree";
-    if (kind === "content" && active.has(target)) {
+    if (active.has(target)) {
       await tileset(target);
       return;
     }
-    if (kind === "content" && scanned.has(target)) return;
-    if (inspectedResources.has(target)) {
-      if (isSubtree) checkSubtreeContentCount(target, formatOptions.expectedContentCount);
-      return;
-    }
+    if (scanned.has(target) || inspectedResources.has(target)) return;
     if (!resources.has(target)) {
       if (resources.size >= options.maxResources) {
         ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
@@ -328,21 +322,15 @@ export async function validateTileset(inputPath, userOptions = {}) {
       ctx.stats.resources++;
     }
     const sniffed = suffix === ".glb" || suffix === ".subtree" ? null : await sniffResource(target);
-    const externalTileset = kind === "content" &&
-      ((suffix === ".json" && sniffed?.magic !== "glTF") ||
-       (suffix !== ".gltf" && sniffed?.tilesetLike));
+    const externalTileset = (suffix === ".json" && sniffed?.magic !== "glTF") ||
+      (suffix !== ".gltf" && sniffed?.tilesetLike);
     if (externalTileset) {
       await tileset(target);
       return;
     }
     inspectedResources.add(target);
     try {
-      if (isSubtree) {
-        ctx.stats.subtrees++;
-        const summary = await inspectSubtree(target, ctx);
-        subtreeSummaries.set(target, summary);
-        checkSubtreeContentCount(target, formatOptions.expectedContentCount);
-      } else if (suffix === ".glb" || sniffed?.magic === "glTF") {
+      if (suffix === ".glb" || sniffed?.magic === "glTF") {
         ctx.stats.glbs++;
         await inspectGlb(target, ctx);
       } else {
@@ -389,6 +377,7 @@ export async function validateTileset(inputPath, userOptions = {}) {
         ctx.error("TRANSFORM_AFFINE", location + "/transform", "Transform must be an affine 4x4 matrix");
       }
     }
+    const implicitTasks = [];
     const implicit = node.implicitTiling ?? node.extensions?.["3DTILES_implicit_tiling"];
     if (implicit !== undefined) {
       if (version === "1.0" && !extensionsUsed.includes("3DTILES_implicit_tiling")) {
@@ -401,26 +390,33 @@ export async function validateTileset(inputPath, userOptions = {}) {
         if (scheme !== "QUADTREE" && scheme !== "OCTREE") {
           ctx.error("IMPLICIT_SCHEME", location, "Expected QUADTREE or OCTREE");
         }
-        if (!Number.isSafeInteger(implicit.subtreeLevels) || implicit.subtreeLevels < 1 ||
-            !Number.isSafeInteger(implicit.availableLevels) || implicit.availableLevels < 1) {
+        const validLevels = Number.isSafeInteger(implicit.subtreeLevels) && implicit.subtreeLevels >= 1 &&
+          Number.isSafeInteger(implicit.availableLevels) && implicit.availableLevels >= 1;
+        if (!validLevels) {
           ctx.error("IMPLICIT_LEVELS", location, "Invalid subtreeLevels or availableLevels");
         }
         const template = implicit.subtrees?.uri ?? implicit.subtrees?.url;
-        validateUriTemplate(template, scheme, location + "/implicitTiling/subtrees", ctx);
-        if (typeof template === "string" && (scheme === "QUADTREE" || scheme === "OCTREE")) {
+        const validTemplate = validateUriTemplate(template, scheme,
+          location + "/implicitTiling/subtrees", ctx);
+        if (validLevels && validTemplate && (scheme === "QUADTREE" || scheme === "OCTREE")) {
           const extensionContents = node.extensions?.["3DTILES_multiple_contents"]?.contents;
           const expectedContentCount = node.content !== undefined ? 1 :
             Array.isArray(node.contents) ? node.contents.length :
               Array.isArray(extensionContents) ? extensionContents.length : 0;
-          const rootSubtree = template
-            .replaceAll("{level}", "0").replaceAll("{x}", "0")
-            .replaceAll("{y}", "0").replaceAll("{z}", "0");
-          await resource(rootSubtree, source, location + "/implicitTiling/rootSubtree", "subtree",
-            { expectedContentCount });
-          ctx.warn("IMPLICIT_PARTIAL", location,
-            "Only root subtree file is checked; deeper subtree availability is not traversed");
-          ctx.cover("partial", "implicit-tree", location,
-            "Only the root subtree is inspected; deeper subtree links and availability are not traversed");
+          implicitTasks.push({
+            scheme,
+            subtreeLevels: implicit.subtreeLevels,
+            availableLevels: implicit.availableLevels,
+            subtreeTemplate: template,
+            expectedContentCount,
+            source,
+            location,
+            rootLevel: 0n,
+            rootX: 0n,
+            rootY: 0n,
+            rootZ: 0n,
+            baseDepth: BigInt(depth),
+          });
         }
       }
       if (node.children !== undefined) {
@@ -506,13 +502,30 @@ export async function validateTileset(inputPath, userOptions = {}) {
       if (typeof uri !== "string" || uri.length === 0) {
         ctx.error("CONTENT_URI", contentPath, "Content uri/url is required");
       } else if (implicit !== undefined) {
-        ctx.warn("IMPLICIT_CONTENT_UNVERIFIED", contentPath,
-          "Implicit content URI template instances are not traversed");
-        ctx.cover("skipped", "implicit-content", contentPath,
-          "Content URI template instances are not traversed");
+        if (record(implicit)) {
+          validateUriTemplate(uri, implicit.subdivisionScheme, contentPath, ctx, "content");
+        }
+        if (!options.checkContent) contentCheckSkipped = true;
+        ctx.cover(options.checkContent ? "checked" : "skipped", "implicit-content", contentPath,
+          options.checkContent ? "Available content template instances are checked lazily" :
+            "Content checking was disabled by option");
       } else {
         await resource(uri, source, contentPath);
       }
+    }
+    for (const task of implicitTasks) {
+      task.contentTemplates = contentEntries.map(({ content }) =>
+        record(content) ? (content.uri ?? content.url) : null);
+      task.expectedContentCount = task.contentTemplates.length;
+      task.rootUri = instantiateTemplate(task.subtreeTemplate, task.rootLevel,
+        task.rootX, task.rootY, task.rootZ);
+      task.rootResourcePath = location + "/implicitTiling/rootSubtree";
+      if (subtreeQueue.length >= options.maxResources) {
+        ctx.error("RESOURCE_LIMIT", task.rootResourcePath,
+          "Reachable subtree queue limit reached");
+        break;
+      }
+      subtreeQueue.push(task);
     }
     if (node.children !== undefined && implicit === undefined) {
       if (!Array.isArray(node.children)) {
@@ -628,6 +641,106 @@ export async function validateTileset(inputPath, userOptions = {}) {
     }
   }
 
+  async function inspectImplicitSubtree(task) {
+    if (ctx.stopped) return;
+    const target = await locate(task.rootUri, task.source, task.rootResourcePath);
+    if (!target) return;
+    if (!resources.has(target)) {
+      if (resources.size >= options.maxResources) {
+        ctx.error("RESOURCE_LIMIT", task.rootResourcePath, "Resource count limit reached");
+        return;
+      }
+      resources.add(target);
+      ctx.stats.resources++;
+    }
+    ctx.cover("checked", "local-resource-reference", task.rootResourcePath,
+      "Relative resource URI resolves to a regular file inside the input root");
+    if (!inspectedSubtrees.has(target)) {
+      inspectedSubtrees.add(target);
+      ctx.stats.subtrees++;
+    }
+    const contextKey = [target, task.scheme, task.subtreeLevels, task.availableLevels,
+      task.expectedContentCount, task.subtreeTemplate, task.contentTemplates.join("\u0001"),
+      task.rootLevel, task.rootX, task.rootY, task.rootZ, task.baseDepth].join("\u0000");
+    if (queuedSubtrees.has(contextKey)) return;
+    queuedSubtrees.add(contextKey);
+    const onContent = options.checkContent ? async (contentIndex, localLevel, mortonIndex) => {
+      if (implicitContentChecks >= options.maxTiles) {
+        ctx.error("TILE_LIMIT", task.rootResourcePath,
+          "Implicit content traversal limit reached");
+        return false;
+      }
+      implicitContentChecks++;
+      const template = task.contentTemplates[contentIndex];
+      if (typeof template !== "string" || template.length === 0) return true;
+      const dimensions = task.scheme === "OCTREE" ? 3 : 2;
+      const local = mortonCoordinates(mortonIndex, localLevel, dimensions);
+      const scale = 1n << BigInt(localLevel);
+      const x = task.rootX * scale + local[0];
+      const y = task.rootY * scale + local[1];
+      const z = task.rootZ * scale + (local[2] ?? 0n);
+      const level = task.rootLevel + BigInt(localLevel);
+      const uri = instantiateTemplate(template, level, x, y, z);
+      const contentPath = task.location + "/implicitTiling/contentAvailability/" +
+        contentIndex + "/" + level + "/" + x + "/" + y + (dimensions === 3 ? "/" + z : "");
+      await resource(uri, task.source, contentPath);
+      return true;
+    } : undefined;
+    try {
+      await inspectSubtree(target, ctx, {
+        scheme: task.scheme,
+        subtreeLevels: task.subtreeLevels,
+        availableLevels: task.availableLevels,
+        rootLevel: task.rootLevel,
+        baseDepth: task.baseDepth,
+        maxDepth: options.maxDepth,
+        expectedContentCount: task.expectedContentCount,
+        onWork: () => {
+          if (implicitAvailabilityChecks >= options.maxTiles) {
+            if (!implicitAvailabilityLimitReported) {
+              ctx.error("TILE_LIMIT", task.rootResourcePath,
+                "Implicit availability traversal limit reached");
+              implicitAvailabilityLimitReported = true;
+            }
+            return false;
+          }
+          implicitAvailabilityChecks++;
+          return true;
+        },
+        onContent,
+        onChild: async (mortonIndex) => {
+          if (subtreeQueue.length >= options.maxResources) {
+            ctx.error("RESOURCE_LIMIT", task.rootResourcePath,
+              "Reachable subtree queue limit reached");
+            return false;
+          }
+          const dimensions = task.scheme === "OCTREE" ? 3 : 2;
+          const local = mortonCoordinates(mortonIndex, task.subtreeLevels, dimensions);
+          const scale = 1n << BigInt(task.subtreeLevels);
+          const rootLevel = task.rootLevel + BigInt(task.subtreeLevels);
+          const rootX = task.rootX * scale + local[0];
+          const rootY = task.rootY * scale + local[1];
+          const rootZ = task.rootZ * scale + (local[2] ?? 0n);
+          const childTask = {
+            ...task,
+            rootLevel,
+            rootX,
+            rootY,
+            rootZ,
+            rootUri: instantiateTemplate(task.subtreeTemplate, rootLevel, rootX, rootY, rootZ),
+            rootResourcePath: task.location + "/implicitTiling/childSubtreeAvailability/" +
+              mortonIndex.toString(),
+          };
+          subtreeQueue.push(childTask);
+          return true;
+        },
+      });
+    } catch (cause) {
+      ctx.error("RESOURCE_READ", task.rootResourcePath,
+        "Could not inspect subtree: " + (cause.code ?? cause.message));
+    }
+  }
+
   try {
     const actual = await realpath(entry);
     if (!within(root, actual)) {
@@ -637,6 +750,9 @@ export async function validateTileset(inputPath, userOptions = {}) {
     }
   } catch {
     ctx.error("INPUT_IO", entry, "Tileset file cannot be opened");
+  }
+  for (let index = 0; index < subtreeQueue.length && !ctx.stopped; index++) {
+    await inspectImplicitSubtree(subtreeQueue[index]);
   }
   if (!options.checkContent && contentCheckSkipped) {
     ctx.warn("CONTENT_SKIPPED", entry, "Content checking was disabled");

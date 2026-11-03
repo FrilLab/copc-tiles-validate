@@ -17,13 +17,13 @@
     },
     {
       "name": "implicit valid output",
-      "category": "ambiguous-semantics",
+      "category": "valid-supported-assets",
       "local": "accept",
-      "localGlbContainer": "unverified",
+      "localGlbContainer": "accept",
       "cesium": "accept",
       "khronos": "accept",
       "localVsCesium": "agreement",
-      "localVsKhronos": "unsupported-standard-rule"
+      "localVsKhronos": "agreement"
     },
     {
       "name": "generated GLB has malformed magic",
