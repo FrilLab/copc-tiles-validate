@@ -184,6 +184,7 @@ export async function validateTileset(inputPath, userOptions = {}) {
   const scanned = new Set();
   const active = new Set();
   const resources = new Set();
+  const inspectedResources = new Set();
   let contentCheckSkipped = false;
 
   async function locate(raw, origin, location) {
@@ -276,13 +277,36 @@ export async function validateTileset(inputPath, userOptions = {}) {
     if (!target) return;
     const suffix = path.extname(target).toLowerCase();
     const sniffed = suffix === ".glb" || suffix === ".subtree" ? null : await sniffResource(target);
-    if (resources.has(target)) return;
-    if (resources.size >= options.maxResources) {
-      ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
+    const externalTileset = kind === "content" &&
+      ((suffix === ".json" && sniffed?.magic !== "glTF") ||
+       (suffix !== ".gltf" && sniffed?.tilesetLike));
+    if (externalTileset) {
+      if (active.has(target)) {
+        await tileset(target);
+        return;
+      }
+      if (scanned.has(target)) return;
+      if (!resources.has(target)) {
+        if (resources.size >= options.maxResources) {
+          ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
+          return;
+        }
+        resources.add(target);
+        ctx.stats.resources++;
+      }
+      await tileset(target);
       return;
     }
-    resources.add(target);
-    ctx.stats.resources++;
+    if (inspectedResources.has(target)) return;
+    if (!resources.has(target)) {
+      if (resources.size >= options.maxResources) {
+        ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
+        return;
+      }
+      resources.add(target);
+      ctx.stats.resources++;
+    }
+    inspectedResources.add(target);
     try {
       if (kind === "subtree" || suffix === ".subtree") {
         ctx.stats.subtrees++;
@@ -290,10 +314,11 @@ export async function validateTileset(inputPath, userOptions = {}) {
       } else if (suffix === ".glb" || sniffed?.magic === "glTF") {
         ctx.stats.glbs++;
         await inspectGlb(target, ctx);
-      } else if (suffix === ".json" && kind === "content") {
-        await tileset(target);
       } else if (suffix !== ".gltf" && sniffed?.tilesetLike) {
-        await tileset(target);
+        ctx.warn("CONTENT_FORMAT_UNVERIFIED", location,
+          "JSON resource resembles a tileset but is not a declared tileset URI");
+        ctx.cover("skipped", "content-format", location,
+          "Ambiguous JSON resource was not traversed as a tileset");
       } else {
         ctx.warn("CONTENT_FORMAT_UNVERIFIED", location,
           "Referenced content exists, but its format is not identified or structurally checked");
@@ -373,49 +398,91 @@ export async function validateTileset(inputPath, userOptions = {}) {
         ctx.error("IMPLICIT_CHILDREN", location, "Implicit root must not define explicit children");
       }
     }
-    const contents = [];
+    const contentEntries = [];
     if (node.content !== undefined && node.contents !== undefined) {
       ctx.error("CONTENT_COLLECTION", location, "A tile cannot define both content and contents");
     }
-    if (node.content !== undefined) contents.push(node.content);
+    if (node.content !== undefined) contentEntries.push({ content: node.content, path: location + "/content" });
     if (node.contents !== undefined) {
       if (!Array.isArray(node.contents) || node.contents.length === 0) {
         ctx.error("CONTENTS", location, "contents must be a nonempty array");
-      } else contents.push(...node.contents);
-      if (version === "1.0" && !extensionsUsed.includes("3DTILES_multiple_contents")) {
-        ctx.error("CONTENTS_VERSION", location, "contents requires 3D Tiles 1.1 or the multiple contents extension");
+      } else {
+        for (let i = 0; i < node.contents.length; i++) {
+          contentEntries.push({ content: node.contents[i], path: location + "/contents/" + i });
+        }
+      }
+      if (version === "1.0") {
+        ctx.error("CONTENTS_VERSION", location,
+          "Top-level contents requires 3D Tiles 1.1; use the declared 1.0 extension field");
       }
     }
-    for (let i = 0; i < contents.length; i++) {
-      const content = contents[i];
+    if (node.extensions !== undefined && !record(node.extensions)) {
+      ctx.error("TILE_EXTENSIONS", location + "/extensions", "extensions must be an object");
+    }
+    if (record(node.extensions)) {
+      for (const extensionName of Object.keys(node.extensions)) {
+        if (!extensionsUsed.includes(extensionName)) {
+          ctx.error("TILE_EXTENSION_UNDECLARED", location + "/extensions/" + extensionName,
+            "Tile extension must be listed in extensionsUsed");
+        }
+      }
+    }
+    const multipleContents = node.extensions?.["3DTILES_multiple_contents"];
+    if (multipleContents !== undefined) {
+      if (version !== "1.0") {
+        ctx.warn("MULTIPLE_CONTENTS_EXTENSION_UNVERIFIED", location,
+          "The 3D Tiles 1.0 multiple contents extension object is not interpreted for this tileset version");
+        ctx.cover("skipped", "multiple-contents-extension", location,
+          "Multiple contents extension object is only interpreted for 3D Tiles 1.0");
+      } else if (!record(multipleContents)) {
+        ctx.error("MULTIPLE_CONTENTS_EXTENSION", location, "multiple contents extension must be an object");
+      } else if (node.content !== undefined) {
+        ctx.error("MULTIPLE_CONTENTS_CONTENT", location,
+          "content must be omitted when the multiple contents extension is used");
+      } else if (!Array.isArray(multipleContents.contents) || multipleContents.contents.length === 0) {
+        ctx.error("MULTIPLE_CONTENTS", location, "Extension contents must be a nonempty array");
+      } else {
+        for (let i = 0; i < multipleContents.contents.length; i++) {
+          contentEntries.push({
+            content: multipleContents.contents[i],
+            path: location + "/extensions/3DTILES_multiple_contents/contents/" + i,
+          });
+        }
+        ctx.cover("checked", "multiple-contents-extension", location,
+          "Declared 3D Tiles 1.0 multiple contents entries and their resources are checked");
+      }
+    }
+    for (const entry of contentEntries) {
+      const content = entry.content;
+      const contentPath = entry.path;
       if (!record(content)) {
-        ctx.error("CONTENT", location + "/contents/" + i, "Content must be an object");
+        ctx.error("CONTENT", contentPath, "Content must be an object");
         continue;
       }
       if (content.boundingVolume !== undefined) {
-        volume(content.boundingVolume, location + "/contents/" + i + "/boundingVolume", ctx);
+        volume(content.boundingVolume, contentPath + "/boundingVolume", ctx);
       }
       if (content.group !== undefined &&
           (!Number.isSafeInteger(content.group) || content.group < 0 || content.group >= groupCount)) {
-        ctx.error("CONTENT_GROUP", location + "/contents/" + i + "/group",
+        ctx.error("CONTENT_GROUP", contentPath + "/group",
           "content.group must reference an existing tileset group");
       }
       if (content.metadata !== undefined) {
-        ctx.warn("CONTENT_METADATA_UNVERIFIED", location + "/contents/" + i,
+        ctx.warn("CONTENT_METADATA_UNVERIFIED", contentPath,
           "Content metadata semantics are not checked");
-        ctx.cover("skipped", "content-metadata", location + "/contents/" + i,
+        ctx.cover("skipped", "content-metadata", contentPath,
           "Content metadata semantics are not checked");
       }
       const uri = content.uri ?? content.url;
       if (typeof uri !== "string" || uri.length === 0) {
-        ctx.error("CONTENT_URI", location + "/contents/" + i, "Content uri/url is required");
+        ctx.error("CONTENT_URI", contentPath, "Content uri/url is required");
       } else if (implicit !== undefined) {
-        ctx.warn("IMPLICIT_CONTENT_UNVERIFIED", location + "/contents/" + i,
+        ctx.warn("IMPLICIT_CONTENT_UNVERIFIED", contentPath,
           "Implicit content URI template instances are not traversed");
-        ctx.cover("skipped", "implicit-content", location + "/contents/" + i,
+        ctx.cover("skipped", "implicit-content", contentPath,
           "Content URI template instances are not traversed");
       } else {
-        await resource(uri, source, location + "/contents/" + i);
+        await resource(uri, source, contentPath);
       }
     }
     if (node.children !== undefined && implicit === undefined) {
@@ -489,6 +556,12 @@ export async function validateTileset(inputPath, userOptions = {}) {
             break;
           }
         }
+      }
+      if (json.asset?.version === "1.0" && extensionsUsed.includes("3DTILES_multiple_contents") &&
+          !(Array.isArray(json.extensionsRequired) &&
+            json.extensionsRequired.includes("3DTILES_multiple_contents"))) {
+        ctx.error("MULTIPLE_CONTENTS_REQUIRED", file + "#/extensionsRequired",
+          "3DTILES_multiple_contents must be listed in extensionsRequired for 3D Tiles 1.0");
       }
       let groupCount = 0;
       if (json.groups !== undefined) {

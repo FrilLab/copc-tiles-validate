@@ -257,6 +257,34 @@ test("applies the resource limit to local external buffer references", async () 
   });
 });
 
+test("inspects a resource after it was first counted as a URI reference", async () => {
+  await temporary(async (dir) => {
+    const brokenGlb = Buffer.alloc(32);
+    brokenGlb.write("BAD!", 0, 4);
+    await writeFile(join(dir, "broken.glb"), brokenGlb);
+    await writeFile(join(dir, "tileset.json"), JSON.stringify({
+      ...data({ content: { uri: "broken.glb" } }),
+      schemaUri: "broken.glb",
+    }));
+    const report = await validateTileset(dir);
+    assert.ok(codes(report).includes("GLB_MAGIC"));
+    assert.equal(report.stats.glbs, 1);
+  });
+  await temporary(async (dir) => {
+    await writeFile(join(dir, "shared.glb"), glb());
+    await writeFile(join(dir, "container.glb"), glb({
+      asset: { version: "2.0" }, buffers: [{ byteLength: 1, uri: "shared.glb" }],
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      content: { uri: "container.glb" },
+      children: [{ boundingVolume: { box }, geometricError: 0, content: { uri: "shared.glb" } }],
+    })));
+    const report = await validateTileset(dir);
+    assert.equal(report.valid, true);
+    assert.equal(report.stats.glbs, 2);
+  });
+});
+
 test("rejects missing required tile fields and invalid content collections", async () => {
   await temporary(async (dir) => {
     const invalid = {
@@ -282,6 +310,24 @@ test("rejects unsupported implicit URI placeholders and 1.0 content collections"
     const report = await validateTileset(dir);
     assert.ok(codes(report).includes("IMPLICIT_TEMPLATE"));
     assert.ok(codes(report).includes("CONTENTS_VERSION"));
+  });
+});
+
+test("traverses 3D Tiles 1.0 multiple contents extension resources", async () => {
+  await temporary(async (dir) => {
+    await writeFile(join(dir, "present.glb"), glb());
+    await writeFile(join(dir, "tileset.json"), JSON.stringify({
+      ...data({ extensions: { "3DTILES_multiple_contents": { contents: [
+        { uri: "present.glb" }, { uri: "missing.glb" },
+      ] } } }, "1.0"),
+      extensionsUsed: ["3DTILES_multiple_contents"],
+      extensionsRequired: ["3DTILES_multiple_contents"],
+    }));
+    const report = await validateTileset(dir);
+    assert.equal(report.valid, false);
+    assert.ok(codes(report).includes("RESOURCE_MISSING"));
+    assert.equal(report.stats.glbs, 1);
+    assert.ok(report.coverage.checked.some((entry) => entry.kind === "multiple-contents-extension"));
   });
 });
 
@@ -416,7 +462,7 @@ test("rejects unaligned and out-of-range subtree buffer views", async () => {
 test("detects cyclic references to external tilesets", async () => {
   await temporary(async (dir) => {
     await writeFile(join(dir, "tileset.json"), JSON.stringify(data({ content: { uri: "second.json" } })));
-    await writeFile(join(dir, "second.json"), JSON.stringify(data({ content: { uri: "tileset.json" } })));
+    await writeFile(join(dir, "second.json"), JSON.stringify(data({ content: { uri: "second.json" } })));
     const report = await validateTileset(dir);
     assert.ok(codes(report).includes("TILESET_CYCLE"));
     assert.equal(report.valid, false);
