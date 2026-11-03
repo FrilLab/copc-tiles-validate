@@ -21,16 +21,8 @@ jobs:
         run: |
           npm install --ignore-scripts --no-audit --no-fund
           npm run verify
-      - name: Test published-package shape
-        shell: bash
-        run: |
-          npm pack --dry-run
-          npm pack --pack-destination "$RUNNER_TEMP"
-          package_file=$(find "$RUNNER_TEMP" -maxdepth 1 -name "frillab-copc-tiles-validate-*.tgz" -print -quit)
-          test -n "$package_file"
-          consumer=$(mktemp -d)
-          npm install --prefix "$consumer" --no-audit --no-fund "$package_file"
-          "$consumer/node_modules/.bin/copc-tiles-validate" --help
+      - name: Test packed consumer contract
+        run: npm run test:packed
 
   differential-conformance:
     runs-on: ubuntu-latest

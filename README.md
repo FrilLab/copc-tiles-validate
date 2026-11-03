@@ -6,7 +6,7 @@ This repository's history includes the former standalone Tiles generator. The pr
 
 > **Status:** Development candidate; not yet published to npm. This tool does **not** certify full 3D Tiles or glTF conformance. Use the official [CesiumGS 3D Tiles Validator](https://github.com/CesiumGS/3d-tiles-validator) and [Khronos glTF Validator](https://github.com/KhronosGroup/glTF-Validator) for independent conformance checks.
 
-[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE) · [Attribution](NOTICE.md) · [GitHub repository](https://github.com/FrilLab/copc-tiles-validate)
+[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Release checklist](RELEASE_CHECKLIST.md) · [License](LICENSE) · [Attribution](NOTICE.md) · [GitHub repository](https://github.com/FrilLab/copc-tiles-validate)
 
 ## Goals
 
@@ -83,5 +83,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, verification, and review expec
 The separate [`integration/producer-fixtures`](integration/producer-fixtures/README.md) job generates explicit and implicit 3D Tiles outputs through the pinned `@frillab/copc-tiles` producer APIs and Adapter Core's public point-preparation APIs. It checks byte hashes, validates every case through both the public API and CLI, and compares the same outputs with pinned CesiumGS and Khronos validators. The producer and official validator packages are test-only; they stay out of the published dependency graph and Node 22/24/26 validator matrix.
 
 The fixture source is synthetic and implements Adapter Core's public source contract. It exercises the real Core coordinate preparation and Tiles generators without opening a COPC file, so it does not establish real-source CRS or content interoperability.
+
+The separate producer gate also packs this validator, installs the tarball in a clean consumer, and validates the generated explicit and implicit outputs through its ESM API and npm CLI. The ordinary Node.js matrix runs the packed-consumer API, declaration, CLI, dependency-graph, and tarball-inventory checks without installing the producer or official validator packages.
 
 To run the integration fixture and differential checks locally, use `npm ci` and `npm run test:conformance` from `integration/producer-fixtures`. The separate conformance job uses Node 22.17.0 because the official validator dependency graph has native and Node-version constraints. Use the generated report as evidence for a narrow conformance statement; this job does not establish full 3D Tiles or glTF conformance.

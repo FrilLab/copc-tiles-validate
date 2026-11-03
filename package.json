@@ -26,8 +26,12 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:packed": "node test/packed-consumer.js",
     "check": "node --check src/index.js && node --check src/cli.js && node --check src/validator.js && node --check src/formats.js",
     "verify": "npm run check && npm test"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
   },
   "repository": {
     "type": "git",
