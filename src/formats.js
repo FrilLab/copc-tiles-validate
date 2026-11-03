@@ -186,11 +186,11 @@ function validateAvailability(record, label, ctx, filePath, viewCount) {
   }
 }
 
-async function validateSubtreeJson(json, filePath, ctx, binaryLength, binaryFormat, expectedContentCount) {
+async function validateSubtreeJson(json, filePath, ctx, binaryLength, binaryFormat) {
   const { error, warn, cover } = ctx;
   if (!isRecord(json)) {
     error("SUBTREE_JSON", filePath, "Subtree JSON must be an object");
-    return;
+    return null;
   }
   if (json.bufferViews !== undefined && !Array.isArray(json.bufferViews)) {
     error("SUBTREE_BUFFER_VIEWS", filePath, "bufferViews must be an array when present");
@@ -252,20 +252,9 @@ async function validateSubtreeJson(json, filePath, ctx, binaryLength, binaryForm
     if (json.contentAvailability.length === 0) {
       error("SUBTREE_CONTENT_AVAILABILITY", filePath, "contentAvailability must be a nonempty array when present");
     }
-    if (expectedContentCount !== undefined && json.contentAvailability.length !== expectedContentCount) {
-      error("SUBTREE_CONTENT_AVAILABILITY_COUNT", filePath,
-        "contentAvailability entries must match the implicit root content count");
-    }
     for (let i = 0; i < json.contentAvailability.length; i++) {
       validateAvailability(json.contentAvailability[i], "contentAvailability[" + i + "]", ctx, filePath, views.length);
     }
-  } else if (expectedContentCount > 0) {
-    error("SUBTREE_CONTENT_AVAILABILITY_MISSING", filePath,
-      "Subtree must define contentAvailability for each declared implicit content");
-  }
-  if (expectedContentCount === 0 && json.contentAvailability !== undefined) {
-    error("SUBTREE_CONTENT_AVAILABILITY_UNEXPECTED", filePath,
-      "contentAvailability must be omitted when the implicit root has no content templates");
   }
   validateAvailability(json.childSubtreeAvailability, "childSubtreeAvailability", ctx, filePath, views.length);
   if (["tileMetadata", "contentMetadata", "subtreeMetadata", "propertyTables"]
@@ -279,9 +268,14 @@ async function validateSubtreeJson(json, filePath, ctx, binaryLength, binaryForm
     filePath, "Subtree fields, buffer declarations, and availability references");
   cover("partial", "subtree-semantics", filePath,
     "Availability bit counts and cross-subtree relationships are not fully validated");
+  return {
+    present: json.contentAvailability !== undefined,
+    isArray: Array.isArray(json.contentAvailability),
+    length: Array.isArray(json.contentAvailability) ? json.contentAvailability.length : undefined,
+  };
 }
 
-export async function inspectSubtree(filePath, ctx, expectedContentCount) {
+export async function inspectSubtree(filePath, ctx) {
   const { error, options } = ctx;
   const size = (await stat(filePath)).size;
   if (size > options.maxFileBytes) {
@@ -303,8 +297,7 @@ export async function inspectSubtree(filePath, ctx, expectedContentCount) {
         error("SUBTREE_JSON_PARSE", filePath, "Malformed JSON subtree");
         return;
       }
-      await validateSubtreeJson(json, filePath, ctx, 0, false, expectedContentCount);
-      return;
+      return await validateSubtreeJson(json, filePath, ctx, 0, false);
     }
     if (size < 24) {
       error("SUBTREE_HEADER", filePath, "Binary subtree header is truncated");
@@ -337,7 +330,7 @@ export async function inspectSubtree(filePath, ctx, expectedContentCount) {
       error("SUBTREE_JSON_PARSE", filePath, "Malformed subtree JSON");
       return;
     }
-    await validateSubtreeJson(json, filePath, ctx, Number(binLength), true, expectedContentCount);
+    return await validateSubtreeJson(json, filePath, ctx, Number(binLength), true);
   } finally {
     await handle.close();
   }

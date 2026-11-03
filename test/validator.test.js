@@ -443,6 +443,31 @@ test("requires subtree content availability for every declared implicit content"
   });
 });
 
+test("checks shared subtree content availability against every implicit root", async () => {
+  for (const contentCounts of [[1, 2], [2, 1]]) {
+    await temporary(async (dir) => {
+      await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+      await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+        tileAvailability: { constant: 1 },
+        contentAvailability: [{ constant: 1 }],
+        childSubtreeAvailability: { constant: 0 },
+      }));
+      const implicitRoot = (contentCount) => ({
+        boundingVolume: { box }, geometricError: 0,
+        implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+          availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+        contents: Array.from({ length: contentCount }, (_, i) => ({ uri: "content" + i + "/{level}.glb" })),
+      });
+      await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+        children: contentCounts.map(implicitRoot),
+      })));
+      const report = await validateTileset(dir);
+      assert.ok(codes(report).includes("SUBTREE_CONTENT_AVAILABILITY_COUNT"));
+      assert.equal(report.stats.subtrees, 1);
+    });
+  }
+});
+
 test("checks JSON subtree buffer URIs against the input root", async () => {
   await temporary(async (dir) => {
     await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });

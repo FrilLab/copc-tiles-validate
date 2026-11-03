@@ -185,7 +185,40 @@ export async function validateTileset(inputPath, userOptions = {}) {
   const active = new Set();
   const resources = new Set();
   const inspectedResources = new Set();
+  const subtreeSummaries = new Map();
+  const checkedSubtreeContentCounts = new Map();
   let contentCheckSkipped = false;
+
+  function checkSubtreeContentCount(target, expectedContentCount) {
+    if (expectedContentCount === undefined) return;
+    let checkedCounts = checkedSubtreeContentCounts.get(target);
+    if (!checkedCounts) {
+      checkedCounts = new Set();
+      checkedSubtreeContentCounts.set(target, checkedCounts);
+    }
+    if (checkedCounts.has(expectedContentCount)) return;
+    checkedCounts.add(expectedContentCount);
+    const summary = subtreeSummaries.get(target);
+    if (!summary) return;
+    if (!summary.isArray) {
+      if (!summary.present && expectedContentCount > 0) {
+        ctx.error("SUBTREE_CONTENT_AVAILABILITY_MISSING", target,
+          "Subtree must define contentAvailability for each declared implicit content");
+      } else if (summary.present && expectedContentCount === 0) {
+        ctx.error("SUBTREE_CONTENT_AVAILABILITY_UNEXPECTED", target,
+          "contentAvailability must be omitted when the implicit root has no content templates");
+      }
+      return;
+    }
+    if (summary.length !== expectedContentCount) {
+      ctx.error("SUBTREE_CONTENT_AVAILABILITY_COUNT", target,
+        "contentAvailability entries must match the implicit root content count");
+    }
+    if (expectedContentCount === 0) {
+      ctx.error("SUBTREE_CONTENT_AVAILABILITY_UNEXPECTED", target,
+        "contentAvailability must be omitted when the implicit root has no content templates");
+    }
+  }
 
   async function locate(raw, origin, location) {
     if (typeof raw !== "string" || raw.length === 0) {
@@ -276,12 +309,16 @@ export async function validateTileset(inputPath, userOptions = {}) {
     const target = await locate(uri, origin, location);
     if (!target) return;
     const suffix = path.extname(target).toLowerCase();
+    const isSubtree = kind === "subtree" || suffix === ".subtree";
     if (kind === "content" && active.has(target)) {
       await tileset(target);
       return;
     }
     if (kind === "content" && scanned.has(target)) return;
-    if (inspectedResources.has(target)) return;
+    if (inspectedResources.has(target)) {
+      if (isSubtree) checkSubtreeContentCount(target, formatOptions.expectedContentCount);
+      return;
+    }
     if (!resources.has(target)) {
       if (resources.size >= options.maxResources) {
         ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
@@ -300,9 +337,11 @@ export async function validateTileset(inputPath, userOptions = {}) {
     }
     inspectedResources.add(target);
     try {
-      if (kind === "subtree" || suffix === ".subtree") {
+      if (isSubtree) {
         ctx.stats.subtrees++;
-        await inspectSubtree(target, ctx, formatOptions.expectedContentCount);
+        const summary = await inspectSubtree(target, ctx);
+        subtreeSummaries.set(target, summary);
+        checkSubtreeContentCount(target, formatOptions.expectedContentCount);
       } else if (suffix === ".glb" || sniffed?.magic === "glTF") {
         ctx.stats.glbs++;
         await inspectGlb(target, ctx);
