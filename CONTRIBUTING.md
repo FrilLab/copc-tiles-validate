@@ -17,10 +17,10 @@ From the repository root:
 ```bash
 npm install
 npm run verify
-npm pack --dry-run
+npm run test:packed
 ```
 
-`npm run verify` runs JavaScript syntax checks and the automated test suite. The CI workflow also packs the package and runs the installed CLI from a clean consumer directory on each supported Node.js line.
+`npm run verify` runs JavaScript syntax checks and the fast validator test suite. `npm run test:packed` checks the dry-run tarball inventory, installs the tarball into a temporary consumer, compiles a TypeScript consumer against its declarations, exercises the ESM API and npm CLI, and inspects the installed production dependency graph. The TypeScript compiler is a development-only dependency and is not shipped as a runtime dependency. CI runs both commands on Node 22.12, 24, and 26.
 
 To smoke-check the CLI against a minimal valid tileset from the checkout:
 
@@ -40,29 +40,14 @@ JSON
 node src/cli.js "$smoke_dir/tileset.json" --json
 ```
 
-To smoke-check the packed CLI in an isolated consumer install:
+The packed-consumer command is the release gate for tarball installation and CLI behavior. It also checks generated producer outputs in the separate integration job. For the slower producer and official-validator comparison, run:
 
 ```bash
-smoke_dir=$(mktemp -d)
-trap 'rm -rf "$smoke_dir"' EXIT
-mkdir "$smoke_dir/consumer" "$smoke_dir/sample"
-npm pack --pack-destination "$smoke_dir"
-package_file=$(find "$smoke_dir" -maxdepth 1 -name 'frillab-copc-tiles-validate-*.tgz' -print -quit)
-npm install --prefix "$smoke_dir/consumer" --no-audit --no-fund "$package_file"
-cat > "$smoke_dir/sample/tileset.json" <<'JSON'
-{
-  "asset": { "version": "1.1" },
-  "geometricError": 0,
-  "root": {
-    "boundingVolume": { "sphere": [0, 0, 0, 1] },
-    "geometricError": 0
-  }
-}
-JSON
-"$smoke_dir/consumer/node_modules/.bin/copc-tiles-validate" "$smoke_dir/sample/tileset.json" --json
+npm ci --prefix integration/producer-fixtures
+npm run test:conformance --prefix integration/producer-fixtures
 ```
 
-These shell examples use POSIX utilities and work in macOS and Linux shells. The CI workflow is the source of truth for the Node.js version matrix.
+The producer and official validators run only in the isolated integration job, outside the ordinary Node.js matrix. Use Node 22.17.0 for this command, matching CI and the pinned validator dependency requirements.
 
 ## Validation changes and tests
 
@@ -78,6 +63,7 @@ These shell examples use POSIX utilities and work in macOS and Linux shells. The
 - Search existing issues before opening a new one. Include the Node.js version, a minimal input or reproduction, the observed diagnostic, and the expected behavior. Remove private or sensitive data from samples.
 - For larger changes to the public API or validation scope, open an issue to discuss the approach before implementation.
 - Keep pull requests focused. Link the related issue, summarize the behavior changed, explain any compatibility or security impact, and list the verification commands and Node versions run.
+- Before proposing an npm release, work through [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) and include the producer fixture / official validator comparison results and any outstanding exceptions.
 - Update user-facing documentation and the Unreleased section of `CHANGELOG.md` when behavior, supported input, CLI usage, or package contents change.
 - Use English for issues, pull requests, commits, and code comments. Preserve Apache-2.0 attribution and update `NOTICE.md` if borrowed code is introduced.
 - Do not publish a package, release, merge a pull request, rename the GitHub repository, or close historic issues as part of a contribution.

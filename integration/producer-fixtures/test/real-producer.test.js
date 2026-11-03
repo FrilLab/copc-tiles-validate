@@ -675,10 +675,26 @@ test("published producer outputs validate through the public API and CLI", async
       });
     }
 
+    const packedConsumer = spawnSync(process.execPath, [join(repositoryRoot, "test/packed-consumer.js")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        PACKED_CONSUMER_FIXTURE_ROOT: temporaryRoot,
+        PACKED_CONSUMER_SKIP_TYPES: "1",
+      },
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    assert.equal(packedConsumer.error, undefined, packedConsumer.error?.message);
+    assert.equal(packedConsumer.status, 0,
+      `packed consumer must validate actual producer-generated explicit and implicit tilesets\n${packedConsumer.stdout}\n${packedConsumer.stderr}`);
+    assert.match(packedConsumer.stdout, /generatedProducerFixtures\":2/);
+
     const summary = {
       producers: expectedHashes.producer,
       fixtureCaseCount: cases.length,
       validatorReports: records,
+      packedTarballProducerFixtures: "passed",
     };
     const serialized = JSON.stringify(summary);
     console.log(`PRODUCER_FIXTURE_SUMMARY ${serialized}`);
@@ -688,6 +704,7 @@ test("published producer outputs validate through the public API and CLI", async
         "",
       `Producer packages: COPC Adapter ${expectedHashes.producer["@frillab/copc-adapter"].version} (${expectedHashes.producer["@frillab/copc-adapter"].integrity}), COPC Tiles ${expectedHashes.producer["@frillab/copc-tiles"].version} (${expectedHashes.producer["@frillab/copc-tiles"].integrity})`,
         `Fixture cases: ${cases.length}`,
+        "Packed tarball API and CLI: passed against the generated explicit and implicit outputs.",
         "",
         "| Fixture | API | CLI | Issues (code / severity) |",
         "| --- | --- | --- | --- |",
