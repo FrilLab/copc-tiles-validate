@@ -123,6 +123,10 @@ export async function validateTileset(inputPath, userOptions = {}) {
     ctx.error("INPUT_IO", entry, "Could not access input: " + cause.code);
     return result(ctx);
   }
+  if (/\.(3tz|3dtiles)$/i.test(entry)) {
+    ctx.error("PACKAGE_UNSUPPORTED", entry, "3TZ and .3dtiles archives are not supported yet");
+    return result(ctx);
+  }
   let root;
   try {
     root = await realpath(path.dirname(entry));

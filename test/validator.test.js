@@ -160,3 +160,13 @@ test("CLI JSON output and failure code", async () => {
     assert.ok(codes(JSON.parse(command.stdout)).includes("RESOURCE_MISSING"));
   });
 });
+
+test("returns an explicit unsupported-format error for archive inputs", async () => {
+  await temporary(async (dir) => {
+    const archive = join(dir, "sample.3tz");
+    await writeFile(archive, "not-an-archive");
+    const report = await validateTileset(archive);
+    assert.equal(report.valid, false);
+    assert.ok(codes(report).includes("PACKAGE_UNSUPPORTED"));
+  });
+});
