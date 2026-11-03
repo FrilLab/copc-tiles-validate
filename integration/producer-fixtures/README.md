@@ -16,11 +16,15 @@ The package lock pins these packed npm artifacts and their integrity hashes:
 
 `expected-sha256.json` records npm integrity values and SHA-256 hashes of the
 producer-generated explicit JSON/GLBs and implicit JSON/GLB/subtree. Update
-those values only after reviewing a deliberate producer change. Test output
-records the producer versions and integrities, fixture case count, and each
-public API/CLI validator report. On GitHub Actions, the same summary is added
-to the job summary.
+those values only after reviewing a deliberate producer change. The generated
+comparison report records fixture cases and outcomes from the local API/CLI,
+CesiumGS, and Khronos validators. The rule mapping and reviewed outcome
+baseline are in [`CONFORMANCE.md`](CONFORMANCE.md) and
+[`conformance-baseline.json`](conformance-baseline.json). On GitHub Actions,
+the summary is added to the job log and uploaded as an artifact.
 
-Run from this directory with `npm ci` followed by `npm test`. Generated files
-are created under the operating system temporary directory and removed after
-the test.
+Run the basic producer checks with `npm ci` followed by `npm test`. Run the
+differential checks with `npm run test:conformance`. Both commands generate
+fixtures under the operating system temporary directory and remove them after
+the test. The conformance command writes `conformance-summary.json` unless
+`CONFORMANCE_REPORT_PATH` sets another path.

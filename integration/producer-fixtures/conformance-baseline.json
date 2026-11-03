@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "tools": {
+    "cesium": "0.6.1",
+    "khronos": "2.0.0-dev.3.10"
+  },
+  "cases": [
+    {
+      "name": "explicit valid output",
+      "category": "valid-supported-assets",
+      "local": "accept",
+      "cesium": "accept",
+      "khronos": "accept",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "agreement"
+    },
+    {
+      "name": "implicit valid output",
+      "category": "ambiguous-semantics",
+      "local": "accept",
+      "cesium": "accept",
+      "khronos": "accept",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "agreement"
+    },
+    {
+      "name": "generated GLB has malformed magic",
+      "category": "malformed-supported-structure",
+      "local": "reject",
+      "cesium": "unverified",
+      "khronos": "reject",
+      "localVsCesium": "official-tool-version-limitation",
+      "localVsKhronos": "agreement"
+    },
+    {
+      "name": "generated GLB has a mismatched declared file length",
+      "category": "malformed-supported-structure",
+      "local": "reject",
+      "cesium": "reject",
+      "khronos": "reject",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "agreement"
+    },
+    {
+      "name": "generated GLB has an invalid chunk length",
+      "category": "malformed-supported-structure",
+      "local": "reject",
+      "cesium": "reject",
+      "khronos": "reject",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "agreement"
+    },
+    {
+      "name": "producer-generated explicit tileset references a missing URI",
+      "category": "malformed-supported-structure",
+      "local": "reject",
+      "cesium": "reject",
+      "khronos": "accept",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "not-applicable"
+    },
+    {
+      "name": "producer-generated tileset has an invalid bounding volume",
+      "category": "malformed-supported-structure",
+      "local": "reject",
+      "cesium": "reject",
+      "khronos": "accept",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "not-applicable"
+    },
+    {
+      "name": "producer-generated subtree is truncated",
+      "category": "malformed-supported-structure",
+      "local": "reject",
+      "cesium": "reject",
+      "khronos": "accept",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "not-applicable"
+    },
+    {
+      "name": "producer-generated subtree has an invalid availability buffer view",
+      "category": "malformed-supported-structure",
+      "local": "reject",
+      "cesium": "reject",
+      "khronos": "accept",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "not-applicable"
+    },
+    {
+      "name": "producer output declares an unsupported extension",
+      "category": "unsupported-extension-or-format",
+      "local": "accept",
+      "cesium": "accept",
+      "khronos": "accept",
+      "localVsCesium": "agreement",
+      "localVsKhronos": "agreement"
+    }
+  ]
+}
