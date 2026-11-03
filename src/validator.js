@@ -267,7 +267,7 @@ export async function validateTileset(inputPath, userOptions = {}) {
     return target;
   };
 
-  async function resource(uri, origin, location, kind = "content") {
+  async function resource(uri, origin, location, kind = "content", formatOptions = {}) {
     if (ctx.stopped) return;
     if (!options.checkContent) {
       contentCheckSkipped = true;
@@ -302,7 +302,7 @@ export async function validateTileset(inputPath, userOptions = {}) {
     try {
       if (kind === "subtree" || suffix === ".subtree") {
         ctx.stats.subtrees++;
-        await inspectSubtree(target, ctx);
+        await inspectSubtree(target, ctx, formatOptions.expectedContentCount);
       } else if (suffix === ".glb" || sniffed?.magic === "glTF") {
         ctx.stats.glbs++;
         await inspectGlb(target, ctx);
@@ -363,18 +363,21 @@ export async function validateTileset(inputPath, userOptions = {}) {
           ctx.error("IMPLICIT_SCHEME", location, "Expected QUADTREE or OCTREE");
         }
         if (!Number.isSafeInteger(implicit.subtreeLevels) || implicit.subtreeLevels < 1 ||
-            !Number.isSafeInteger(implicit.availableLevels) || implicit.availableLevels < 1 ||
-            (Number.isSafeInteger(implicit.subtreeLevels) && Number.isSafeInteger(implicit.availableLevels) &&
-             implicit.subtreeLevels > implicit.availableLevels)) {
+            !Number.isSafeInteger(implicit.availableLevels) || implicit.availableLevels < 1) {
           ctx.error("IMPLICIT_LEVELS", location, "Invalid subtreeLevels or availableLevels");
         }
         const template = implicit.subtrees?.uri ?? implicit.subtrees?.url;
         validateUriTemplate(template, scheme, location + "/implicitTiling/subtrees", ctx);
         if (typeof template === "string" && (scheme === "QUADTREE" || scheme === "OCTREE")) {
+          const extensionContents = node.extensions?.["3DTILES_multiple_contents"]?.contents;
+          const expectedContentCount = node.content !== undefined ? 1 :
+            Array.isArray(node.contents) ? node.contents.length :
+              Array.isArray(extensionContents) ? extensionContents.length : 0;
           const rootSubtree = template
             .replaceAll("{level}", "0").replaceAll("{x}", "0")
             .replaceAll("{y}", "0").replaceAll("{z}", "0");
-          await resource(rootSubtree, source, location + "/implicitTiling/rootSubtree", "subtree");
+          await resource(rootSubtree, source, location + "/implicitTiling/rootSubtree", "subtree",
+            { expectedContentCount });
           ctx.warn("IMPLICIT_PARTIAL", location,
             "Only root subtree file is checked; deeper subtree availability is not traversed");
           ctx.cover("partial", "implicit-tree", location,

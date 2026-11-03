@@ -405,6 +405,44 @@ test("inspects a JSON format implicit subtree", async () => {
   });
 });
 
+test("accepts subtreeLevels greater than availableLevels", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    const document = {
+      buffers: [{ byteLength: 8 }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 1 }],
+      tileAvailability: { bitstream: 0, availableCount: 1 },
+      childSubtreeAvailability: { constant: 0 },
+    };
+    const binary = Buffer.alloc(8);
+    binary[0] = 1;
+    await writeFile(join(dir, "subtrees", "0", "0", "0.subtree"), subtree(document, binary));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+        availableLevels: 1, subtrees: { uri: "subtrees/{level}/{x}/{y}.subtree" } },
+    })));
+    const report = await validateTileset(dir);
+    assert.equal(report.valid, true);
+    assert.ok(!codes(report).includes("IMPLICIT_LEVELS"));
+  });
+});
+
+test("requires subtree content availability for every declared implicit content", async () => {
+  await temporary(async (dir) => {
+    await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
+    await writeFile(join(dir, "subtrees", "0", "0", "0.json"), JSON.stringify({
+      tileAvailability: { constant: 1 },
+      childSubtreeAvailability: { constant: 0 },
+    }));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
+      implicitTiling: { subdivisionScheme: "QUADTREE", subtreeLevels: 2,
+        availableLevels: 4, subtrees: { uri: "subtrees/{level}/{x}/{y}.json" } },
+      content: { uri: "content/{level}/{x}/{y}.glb" },
+    })));
+    assert.ok(codes(await validateTileset(dir)).includes("SUBTREE_CONTENT_AVAILABILITY_MISSING"));
+  });
+});
+
 test("checks JSON subtree buffer URIs against the input root", async () => {
   await temporary(async (dir) => {
     await mkdir(join(dir, "subtrees", "0", "0"), { recursive: true });
