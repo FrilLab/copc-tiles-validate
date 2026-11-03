@@ -38,7 +38,7 @@ async function sniffResource(file) {
     return {
       magic: prefix.toString("ascii", 0, Math.min(4, bytesRead)),
       tilesetLike: first >= 0 && text[first] === "{" &&
-        ['"asset"', '"root"', '"geometricError"'].some((key) => text.includes(key)),
+        ['"asset"', '"root"', '"geometricError"'].every((key) => text.includes(key)),
     };
   } finally {
     await handle.close();
@@ -276,27 +276,11 @@ export async function validateTileset(inputPath, userOptions = {}) {
     const target = await locate(uri, origin, location);
     if (!target) return;
     const suffix = path.extname(target).toLowerCase();
-    const sniffed = suffix === ".glb" || suffix === ".subtree" ? null : await sniffResource(target);
-    const externalTileset = kind === "content" &&
-      ((suffix === ".json" && sniffed?.magic !== "glTF") ||
-       (suffix !== ".gltf" && sniffed?.tilesetLike));
-    if (externalTileset) {
-      if (active.has(target)) {
-        await tileset(target);
-        return;
-      }
-      if (scanned.has(target)) return;
-      if (!resources.has(target)) {
-        if (resources.size >= options.maxResources) {
-          ctx.error("RESOURCE_LIMIT", location, "Resource count limit reached");
-          return;
-        }
-        resources.add(target);
-        ctx.stats.resources++;
-      }
+    if (kind === "content" && active.has(target)) {
       await tileset(target);
       return;
     }
+    if (kind === "content" && scanned.has(target)) return;
     if (inspectedResources.has(target)) return;
     if (!resources.has(target)) {
       if (resources.size >= options.maxResources) {
@@ -306,6 +290,14 @@ export async function validateTileset(inputPath, userOptions = {}) {
       resources.add(target);
       ctx.stats.resources++;
     }
+    const sniffed = suffix === ".glb" || suffix === ".subtree" ? null : await sniffResource(target);
+    const externalTileset = kind === "content" &&
+      ((suffix === ".json" && sniffed?.magic !== "glTF") ||
+       (suffix !== ".gltf" && sniffed?.tilesetLike));
+    if (externalTileset) {
+      await tileset(target);
+      return;
+    }
     inspectedResources.add(target);
     try {
       if (kind === "subtree" || suffix === ".subtree") {
@@ -314,11 +306,6 @@ export async function validateTileset(inputPath, userOptions = {}) {
       } else if (suffix === ".glb" || sniffed?.magic === "glTF") {
         ctx.stats.glbs++;
         await inspectGlb(target, ctx);
-      } else if (suffix !== ".gltf" && sniffed?.tilesetLike) {
-        ctx.warn("CONTENT_FORMAT_UNVERIFIED", location,
-          "JSON resource resembles a tileset but is not a declared tileset URI");
-        ctx.cover("skipped", "content-format", location,
-          "Ambiguous JSON resource was not traversed as a tileset");
       } else {
         ctx.warn("CONTENT_FORMAT_UNVERIFIED", location,
           "Referenced content exists, but its format is not identified or structurally checked");

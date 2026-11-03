@@ -469,6 +469,16 @@ test("detects cyclic references to external tilesets", async () => {
   });
 });
 
+test("identifies an extensionless external tileset from its required fields", async () => {
+  await temporary(async (dir) => {
+    await writeFile(join(dir, "child"), JSON.stringify(data({})));
+    await writeFile(join(dir, "tileset.json"), JSON.stringify(data({ content: { uri: "child" } })));
+    const report = await validateTileset(dir);
+    assert.equal(report.valid, true);
+    assert.equal(report.stats.tilesets, 2);
+  });
+});
+
 test("enforces tile count and JSON input bounds", async () => {
   await temporary(async (dir) => {
     await writeFile(join(dir, "tileset.json"), JSON.stringify(data({
