@@ -507,6 +507,7 @@ function summarizeKhronos(report) {
 function classifyComparison(localOutcome, officialOutcome, category, applicable) {
   if (!applicable) return "not-applicable";
   if (officialOutcome === "unverified") return "official-tool-version-limitation";
+  if (localOutcome === "unverified") return "unsupported-standard-rule";
   if (localOutcome === officialOutcome) return "agreement";
   if (category === "unsupported-extension-or-format" || category === "ambiguous-semantics") {
     return "unsupported-standard-rule";
@@ -533,7 +534,8 @@ async function runDifferentialValidation(cases, records) {
     const localOutcome = local.valid ? "accept" : "reject";
     const glbError = local.issues.some((issue) => issue.severity === "ERROR" &&
       (issue.code.startsWith("GLB_") || issue.code.startsWith("GLTF_")));
-    const localGlbOutcome = glbError ? "reject" : "accept";
+    const localGlbOutcome = glbError ? "reject" :
+      local.coverage.checked.includes("glb-container") ? "accept" : "unverified";
     const files = await listGlbFiles(fixtureCase.source);
     const cesium = summarizeCesium(
       await cesiumValidator.validateTilesetFile(join(fixtureCase.source, "tileset.json")),
@@ -586,6 +588,8 @@ async function runDifferentialValidation(cases, records) {
     const expected = baseline.cases.find((item) => item.name === entry.name);
     assert.equal(entry.category, expected.category, `${entry.name}: fixture classification`);
     assert.equal(entry.local.outcome, expected.local, `${entry.name}: local validator outcome`);
+    assert.equal(entry.local.glbContainerOutcome, expected.localGlbContainer,
+      `${entry.name}: local GLB container coverage outcome`);
     assert.equal(entry.cesium.outcome, expected.cesium, `${entry.name}: CesiumGS validator outcome`);
     assert.equal(entry.khronos.outcome, expected.khronos, `${entry.name}: Khronos validator outcome`);
     assert.equal(entry.comparison.localVsCesium, expected.localVsCesium,
@@ -606,11 +610,11 @@ async function runDifferentialValidation(cases, records) {
       "## Differential validation against official validators",
       "",
       `CesiumGS 3D Tiles Validator ${cesiumPackage.version}; Khronos glTF Validator ${gltfPackage.version}.`,
-      `Machine-readable report: conformance-summary.json (${comparisons.length} cases). Unverified means a generated GLB has no content-validation record.`,
+      `Machine-readable report: conformance-summary.json (${comparisons.length} cases). Unverified means no coverage record exists for a generated GLB.`,
       "",
-      "| Fixture | Category | Local | CesiumGS | Khronos GLB | Local / CesiumGS | GLB / Khronos |",
-      "| --- | --- | --- | --- | --- | --- | --- |",
-      ...comparisons.map((entry) => `| ${entry.name} | ${entry.category} | ${entry.local.outcome} | ${entry.cesium.outcome} | ${entry.khronos.outcome} | ${entry.comparison.localVsCesium} | ${entry.comparison.localVsKhronos} |`),
+      "| Fixture | Category | Local tileset | Local GLB | CesiumGS | Khronos GLB | Local / CesiumGS | GLB / Khronos |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      ...comparisons.map((entry) => `| ${entry.name} | ${entry.category} | ${entry.local.outcome} | ${entry.local.glbContainerOutcome} | ${entry.cesium.outcome} | ${entry.khronos.outcome} | ${entry.comparison.localVsCesium} | ${entry.comparison.localVsKhronos} |`),
       "",
     ];
     await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));
