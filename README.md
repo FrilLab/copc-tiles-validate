@@ -33,7 +33,7 @@ npm install @frillab/copc-tiles-validate
 npx copc-tiles-validate ./output/tileset.json --json
 ```
 
-The CLI accepts a `tileset.json` path or a directory containing it. Use `--no-content` to skip referenced-resource checks. It exits with **0** when no implemented check reports an error, **1** when errors are found, and **2** for invalid arguments or runtime argument failures. Warnings do not change the exit code.
+The CLI accepts a `tileset.json` path or a directory containing it. Use `--no-content` to skip referenced-resource checks. By default it exits with **0** when no implemented check reports an error, **1** when errors are found, and **2** for invalid arguments or runtime argument failures. `--fail-on-unverified` also exits with **1** if any coverage is partial or skipped.
 
 ## Library API
 
@@ -48,19 +48,20 @@ const report = await validateTileset("./output/tileset.json", {
   maxFileBytes: 2 * 1024 * 1024 * 1024,
   maxResources: 100000,
   maxIssues: 500,
+  failOnUnverified: false,
 });
 
-console.log(report.valid, report.conformance, report.issues);
+console.log(report.valid, report.passed, report.coverage, report.issues);
 ```
 
-The report contains `valid`, `conformance: "partial"`, `issues` (`severity`, `code`, `path`, and `message`), and `stats`. `valid: true` means only that the implemented checks found no errors; it is not standards certification.
+The report contains `valid`, `passed`, `coverage`, `conformance: "partial"`, `issues` (`severity`, `code`, `path`, and `message`), and `stats`. `valid: true` keeps its existing meaning: the implemented structural checks found no errors. `passed` applies the selected policy and becomes false for partial or skipped coverage when `failOnUnverified: true`. Coverage lists checked, partial, and skipped areas with counts, reasons, and up to five example paths. A `complete` coverage status describes only the checks implemented by this package; it is not standards certification.
 
 ## Implemented checks
 
 - Basic tileset and tile structure for 3D Tiles 1.0 and 1.1, including asset version, geometric error, bounding volumes, transforms, refine values, children, and content URI fields.
 - Local resource references, including missing files, external tileset JSON, cycles, path traversal, and symlink escapes outside the input directory.
-- GLB 2.0 container structure, JSON asset version, chunk bounds, and embedded buffer length.
-- Implicit tiling configuration and URI templates; structural checks of the root binary subtree and its JSON availability objects.
+- GLB 2.0 container structure, JSON asset version, chunk order and bounds, embedded buffer length, and local external-buffer references. GLB content is also identified by magic when its URI has no `.glb` suffix.
+- Implicit tiling configuration and URI templates; structural checks of the root JSON or binary subtree and its availability objects.
 - Configurable limits for tile count, traversal depth, JSON size, resource count, file size, and diagnostic count.
 
 ## Known limitations
