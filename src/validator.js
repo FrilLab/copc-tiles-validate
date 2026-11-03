@@ -171,8 +171,13 @@ export async function validateTileset(inputPath, userOptions = {}) {
         ctx.error("URI_SYMLINK_ESCAPE", location, "Resource symlink escapes tileset directory");
         return null;
       }
-      if (!(await stat(actual)).isFile()) {
+      const metadata = await stat(actual);
+      if (!metadata.isFile()) {
         ctx.error("RESOURCE_NOT_FILE", location, "Resource is not a regular file");
+        return null;
+      }
+      if (metadata.size > options.maxFileBytes) {
+        ctx.error("FILE_LIMIT", location, "Resource exceeds maxFileBytes");
         return null;
       }
       return actual;

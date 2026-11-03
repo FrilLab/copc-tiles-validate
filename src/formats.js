@@ -194,7 +194,9 @@ export async function inspectSubtree(filePath, ctx) {
         error("SUBTREE_BUFFER_VIEW_RANGE", filePath, "bufferView exceeds declared buffer");
       }
     }
-    if (buffers.length > 0 && buffers[0].uri === undefined &&
+    if (buffers.length > 0 && (!isRecord(buffers[0]) || !safeByteLength(buffers[0].byteLength))) {
+      error("SUBTREE_BUFFER", filePath, "Invalid declared binary buffer");
+    } else if (buffers.length > 0 && buffers[0].uri === undefined &&
         buffers[0].byteLength > Number(binLength)) {
       error("SUBTREE_BUFFER_RANGE", filePath, "Embedded buffer exceeds binary chunk");
     }

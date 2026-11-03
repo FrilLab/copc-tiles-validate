@@ -11,7 +11,10 @@
     "copc-tiles-validate": "./src/cli.js"
   },
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
   },
   "files": [
     "src/",
@@ -27,5 +30,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/FrilLab/copc-tiles-validate.git"
-  }
+  },
+  "types": "./src/index.d.ts"
 }
