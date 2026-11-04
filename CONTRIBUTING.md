@@ -15,7 +15,7 @@ The package has no runtime dependencies and uses built-in Node.js modules.
 From the repository root:
 
 ```bash
-npm install
+npm ci
 npm run verify
 npm run test:packed
 ```

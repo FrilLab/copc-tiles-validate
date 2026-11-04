@@ -19,7 +19,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Run source checks and tests
         run: |
-          npm install --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
           npm run verify
       - name: Test packed consumer contract
         run: npm run test:packed
