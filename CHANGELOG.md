@@ -1,12 +1,19 @@
 # Changelog
 
-Notable changes to this project are recorded here. There are no published validator releases yet; the entries below describe the current unreleased development candidate.
+Notable changes to this project are recorded here.
 
 ## [Unreleased]
 
 ## [0.1.0] - 2026-11-04
 
 ## Changed
+
+- Correct the npm README published-package status and installation instructions.
+- Add GitHub Release-triggered npm Trusted Publishing (OIDC) with tag, main-ancestry, test and duplicate-version gates.
+
+## [0.1.0] - 2026-11-04
+
+### Changed
 
 - Repurposed the repository history of the former standalone 3D Tiles generator for the independent `copc-tiles-validate` project.
 

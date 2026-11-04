@@ -11,8 +11,8 @@ runtime and the Node 22/24/26 CI matrix do not depend on these producer packages
 
 The package lock pins these packed npm artifacts and their integrity hashes:
 
-- `@frillab/copc-adapter@0.7.1`
-- `@frillab/copc-tiles@0.1.0`
+- `@frillab/copc-adapter@0.8.0`
+- `@frillab/copc-tiles@0.1.1`
 
 `expected-sha256.json` records npm integrity values and SHA-256 hashes of the
 producer-generated explicit JSON/GLBs and implicit JSON/GLB/subtree. Update
