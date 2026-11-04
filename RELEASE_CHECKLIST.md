@@ -38,6 +38,8 @@ conformance.
 - [ ] Confirm `package.json` name, version, Node engine, repository, homepage,
   and issue tracker URLs match this repository. The packed-consumer gate checks
   the URL fields and README repository link.
+- [ ] Confirm the root `package-lock.json` is committed and in sync with
+  `package.json`; the Node.js matrix must install it with `npm ci`.
 - [ ] Confirm the tarball contains `README.md`, `LICENSE`, `NOTICE.md`,
   `CHANGELOG.md`, `CONTRIBUTING.md`, and `src/`, and contains no tests,
   integration fixtures, generated binary assets, archives, or `node_modules`.

@@ -12,6 +12,7 @@ Notable changes to this project are recorded here. There are no published valida
 
 - A Node 22/24/26 packed-consumer release gate for tarball contents, dependency graph, JavaScript ESM, TypeScript declarations, and CLI behavior, plus packed-tarball validation of generated producer outputs in the isolated conformance job.
 - An initial release readiness checklist and versioning / release notes policy.
+- A committed root npm lockfile and reproducible `npm ci` installs for validator CI and contributor setup.
 - Initial dependency-free Node.js library and CLI for partial structural validation of local 3D Tiles 1.0 and 1.1 tilesets.
 - Checks for basic tileset and tile structure, bounding volumes, local resource references, GLB 2.0 containers, and bounded traversal of reachable implicit subtrees and available content.
 - Configurable limits for input sizes, resources, tile count, traversal depth, and issue reporting.

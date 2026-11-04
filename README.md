@@ -21,7 +21,7 @@ This repository's history includes the former standalone Tiles generator. The pr
 The package has not been published to npm yet. From a checkout, run:
 
 ```bash
-npm install
+npm ci
 npm run verify
 node src/cli.js ./output/tileset.json --json
 ```
