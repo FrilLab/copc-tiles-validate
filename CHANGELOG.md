@@ -4,7 +4,9 @@ Notable changes to this project are recorded here. There are no published valida
 
 ## [Unreleased]
 
-### Changed
+## [0.1.0] - 2026-11-04
+
+## Changed
 
 - Repurposed the repository history of the former standalone 3D Tiles generator for the independent `copc-tiles-validate` project.
 
