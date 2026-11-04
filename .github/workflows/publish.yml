@@ -1,0 +1,101 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run fast checks and packed consumer
+        run: |
+          npm run verify
+          npm run test:packed
+
+  conformance:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.17.0'
+          package-manager-cache: false
+      - name: Install pinned producer and official validators
+        working-directory: integration/producer-fixtures
+        run: npm ci --no-audit --no-fund
+      - name: Verify generated producer assets
+        working-directory: integration/producer-fixtures
+        run: npm run test:conformance
+
+  publish:
+    if: ${{ !github.event.release.prerelease }}
+    needs: [validate, conformance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Verify release tag, version and main ancestry
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const tag = process.env.RELEASE_TAG;
+            if (!/^v[0-9]+[.][0-9]+[.][0-9]+$/.test(tag) || tag !== "v" + pkg.version) {
+              console.error("Release tag does not match package version: " + tag + " vs " + pkg.version);
+              process.exit(1);
+            }
+          '
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check npm for existing version
+        id: registry
+        shell: bash
+        run: |
+          PACKAGE="$(node -p 'require("./package.json").name')"
+          VERSION="$(node -p 'require("./package.json").version')"
+          VERSIONS="$(npm view "$PACKAGE" versions --json --registry=https://registry.npmjs.org/)"
+          if jq -e --arg v "$VERSION" 'if type == "array" then index($v) != null else . == $v end' <<< "$VERSIONS" >/dev/null; then
+            echo "Version $VERSION already exists on npm; skipping duplicate publication."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish via npm Trusted Publishing (OIDC)
+        if: steps.registry.outputs.published == 'false'
+        run: npm publish --access public
+      - name: Confirm published version
+        if: steps.registry.outputs.published == 'false'
+        run: |
+          PACKAGE="$(node -p 'require("./package.json").name')"
+          VERSION="$(node -p 'require("./package.json").version')"
+          ACTUAL="$(npm view "$PACKAGE@$VERSION" version --registry=https://registry.npmjs.org/)"
+          test "$ACTUAL" = "$VERSION"

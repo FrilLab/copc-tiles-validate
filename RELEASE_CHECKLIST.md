@@ -1,6 +1,6 @@
 # Release readiness checklist
 
-This project is an unpublished development candidate. A release is ready only
+This project publishes versioned 0.x structural validation releases. A new release is ready only
 when every gate below has current evidence and a maintainer explicitly approves
 the release. Passing these gates does not certify full 3D Tiles or glTF
 conformance.
@@ -64,3 +64,11 @@ conformance.
 - A completed checklist is evidence for review, not permission to publish.
   Publishing, tagging, merging, and closing issues remain explicit maintainer
   actions.
+
+## GitHub Release to npm Trusted Publishing
+
+- [ ] Configure the package's npm Trusted Publisher: GitHub owner `FrilLab`, repo `copc-tiles-validate`, workflow filename `publish.yml`, enable `npm publish`, and leave the environment name empty. Do not store an npm publish token.
+- [ ] Change the package version **and** root lockfile, finalize a dated changelog heading for the new version, and merge the release commit to `main`.
+- [ ] Create `vX.Y.Z` tag on the merged commit and publish a non-prerelease GitHub Release. Every merge to main does **not** publish.
+- [ ] Review the release workflow (fast checks, packed consumer, pinned producer conformance, tag-to-version, ancestry, and duplicate npm version check).
+- [ ] Verify npm version, package installation, and updated README after publication. npm does not permit rewriting README bytes for an existing version.

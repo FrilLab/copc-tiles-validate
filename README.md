@@ -4,7 +4,7 @@ A lightweight, source-neutral **structural** validator for local 3D Tiles assets
 
 This repository's history includes the former standalone Tiles generator. The project is now maintained as `copc-tiles-validate`, an independent validator package.
 
-> **Status:** Development candidate; not yet published to npm. This tool does **not** certify full 3D Tiles or glTF conformance. Use the official [CesiumGS 3D Tiles Validator](https://github.com/CesiumGS/3d-tiles-validator) and [Khronos glTF Validator](https://github.com/KhronosGroup/glTF-Validator) for independent conformance checks.
+> **Status:** Published on [npm](https://www.npmjs.com/package/@frillab/copc-tiles-validate) as an early 0.x structural validator. This tool does **not** certify full 3D Tiles or glTF conformance. Use the official [CesiumGS 3D Tiles Validator](https://github.com/CesiumGS/3d-tiles-validator) and [Khronos glTF Validator](https://github.com/KhronosGroup/glTF-Validator) for independent conformance checks.
 
 [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Release checklist](RELEASE_CHECKLIST.md) · [License](LICENSE) · [Attribution](NOTICE.md) · [GitHub repository](https://github.com/FrilLab/copc-tiles-validate)
 
@@ -18,19 +18,21 @@ This repository's history includes the former standalone Tiles generator. The pr
 
 ## Install and run
 
-The package has not been published to npm yet. From a checkout, run:
+Install from npm:
+
+```bash
+npm install --save-dev @frillab/copc-tiles-validate
+npx copc-tiles-validate ./output/tileset.json --json
+```
+
+You can also run it directly with `npx @frillab/copc-tiles-validate ./output/tileset.json --json`.
+
+From a source checkout:
 
 ```bash
 npm ci
 npm run verify
 node src/cli.js ./output/tileset.json --json
-```
-
-After publication, install and run the CLI with:
-
-```bash
-npm install @frillab/copc-tiles-validate
-npx copc-tiles-validate ./output/tileset.json --json
 ```
 
 The CLI accepts a `tileset.json` path or a directory containing it. Use `--no-content` to skip referenced-resource checks. By default it exits with **0** when no implemented check reports an error, **1** when errors are found, and **2** for invalid arguments or runtime argument failures. `--fail-on-unverified` also exits with **1** if any coverage is partial or skipped.
@@ -87,3 +89,11 @@ The fixture source is synthetic and implements Adapter Core's public source cont
 The separate producer gate also packs this validator, installs the tarball in a clean consumer, and validates the generated explicit and implicit outputs through its ESM API and npm CLI. The ordinary Node.js matrix runs the packed-consumer API, declaration, CLI, dependency-graph, and tarball-inventory checks without installing the producer or official validator packages.
 
 To run the integration fixture and differential checks locally, use `npm ci` and `npm run test:conformance` from `integration/producer-fixtures`. The separate conformance job uses Node 22.17.0 because the official validator dependency graph has native and Node-version constraints. Use the generated report as evidence for a narrow conformance statement; this job does not establish full 3D Tiles or glTF conformance.
+
+## Automated npm releases
+
+Releases are published from a **non-prerelease GitHub Release** (not on every push to main). The tag must equal `v` plus the version in `package.json`, and the tagged commit must be contained in `main`. A release job checks the package, installs a clean packed consumer, and runs the independent validator comparison before publishing. If that exact version is already on npm, the publish step is skipped.
+
+The npm package owner must configure a [Trusted Publisher](https://docs.npmjs.com/trusted-publishers/) with GitHub owner `FrilLab`, repository `copc-tiles-validate`, workflow filename `publish.yml`, **no environment name**, and permission to run `npm publish`. The workflow uses OIDC, not a stored `NPM_TOKEN`.
+
+Before publishing a new GitHub Release, finalize the dated changelog entry, update `package.json` and the root lockfile to the new version, merge into main, create a matching `vX.Y.Z` tag on that commit, and publish the GitHub Release. See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).

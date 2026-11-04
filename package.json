@@ -1,6 +1,6 @@
 {
   "name": "@frillab/copc-tiles-validate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Dependency-free structural validation for local 3D Tiles 1.0 and 1.1 assets",
   "type": "module",
   "license": "Apache-2.0",
@@ -41,5 +41,9 @@
   "bugs": {
     "url": "https://github.com/FrilLab/copc-tiles-validate/issues"
   },
-  "types": "./src/index.d.ts"
+  "types": "./src/index.d.ts",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
 }
