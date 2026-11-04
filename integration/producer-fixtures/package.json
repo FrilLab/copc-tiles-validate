@@ -10,8 +10,8 @@
     "test:conformance": "node scripts/run-conformance.js"
   },
   "devDependencies": {
-    "@frillab/copc-adapter": "0.7.1",
-    "@frillab/copc-tiles": "0.1.0",
+    "@frillab/copc-adapter": "0.8.0",
+    "@frillab/copc-tiles": "0.1.1",
     "3d-tiles-validator": "0.6.1",
     "gltf-validator": "2.0.0-dev.3.10"
   }

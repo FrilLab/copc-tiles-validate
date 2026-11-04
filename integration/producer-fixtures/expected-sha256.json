@@ -1,12 +1,12 @@
 {
   "producer": {
     "@frillab/copc-adapter": {
-      "version": "0.7.1",
-      "integrity": "sha512-apm67tKwhOr41elWw845NaYJrMsz74oXWtD7ZEMntLkUaFhos0uM/EMsVBNOEwXg77JjN363hQi70hTOLD7yJQ=="
+      "version": "0.8.0",
+      "integrity": "sha512-2ASSn7CK0iw8p8PtfMf9mVh1bRPfyS89Eg33FrDkn3bLT2aNjQ9tpUoUvsW+LLbPy8gnqDD92XpKsUCuQMMbNA=="
     },
     "@frillab/copc-tiles": {
-      "version": "0.1.0",
-      "integrity": "sha512-8WDrUAhQc4BCl0dGiJMe+NEv4DBXmiqWvPLWHvL5XUk5K5orU0B0MZTEeLTs8ABAn2Pj4K964ZX+peQlU0vOxg=="
+      "version": "0.1.1",
+      "integrity": "sha512-n8uvdJHuHr5GnRSjBXxnhBSp9xXpf67702uO6S/A6X/wDSiE37SIUOgp2CuDnKrb3vLIZioE0audTNhNpaJYyA=="
     }
   },
   "artifacts": {
