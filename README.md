@@ -1,5 +1,11 @@
 # copc-tiles-validate
 
+[![npm version](https://img.shields.io/npm/v/%40frillab%2Fcopc-tiles-validate)](https://www.npmjs.com/package/@frillab/copc-tiles-validate)
+[![npm downloads](https://img.shields.io/npm/dm/%40frillab%2Fcopc-tiles-validate)](https://www.npmjs.com/package/@frillab/copc-tiles-validate)
+[![Node.js](https://img.shields.io/node/v/%40frillab%2Fcopc-tiles-validate)](https://www.npmjs.com/package/@frillab/copc-tiles-validate)
+[![CI](https://github.com/FrilLab/copc-tiles-validate/actions/workflows/ci.yml/badge.svg)](https://github.com/FrilLab/copc-tiles-validate/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/FrilLab/copc-tiles-validate)](LICENSE)
+
 A lightweight, source-neutral **structural** validator for local 3D Tiles assets. It does not require COPC.
 
 This repository's history includes the former standalone Tiles generator. The project is now maintained as `copc-tiles-validate`, an independent validator package.
