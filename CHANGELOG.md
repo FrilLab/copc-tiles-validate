@@ -4,9 +4,9 @@ Notable changes to this project are recorded here.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-11-04
+## [0.1.1] - 2026-11-10
 
-## Changed
+### Changed
 
 - Correct the npm README published-package status and installation instructions.
 - Add GitHub Release-triggered npm Trusted Publishing (OIDC) with tag, main-ancestry, test and duplicate-version gates.
